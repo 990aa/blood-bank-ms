@@ -1,8 +1,6 @@
 
 import pytest
-import sqlite3
 import os
-from datetime import date
 from app.logic import smart_allocate_all, process_donation
 from db_init import init_db
 import db
