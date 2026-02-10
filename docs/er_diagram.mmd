@@ -1,0 +1,58 @@
+erDiagram
+    DONOR {
+        int donor_id PK
+        string name
+        string blood_group
+        string phone
+        string email
+        date last_donation_date
+    }
+
+    RECIPIENT {
+        int recipient_id PK
+        string name
+        string hospital_name
+        string contact_info
+    }
+
+    DONATION_LOG {
+        int donation_id PK
+        int donor_id FK
+        date donation_date
+        float quantity_ml
+    }
+
+    BLOOD_BAG {
+        int bag_id PK
+        int donation_id FK
+        string blood_group
+        date collection_date
+        date expiry_date
+        float initial_volume_ml
+        float current_volume_ml
+        string status
+    }
+
+    TRANSFUSION_REQ {
+        int req_id PK
+        int recipient_id FK
+        string requested_group
+        float quantity_ml
+        string urgency_level
+        date req_date
+        string status
+    }
+
+    FULFILLMENT_LOG {
+        int fulfillment_id PK
+        int req_id FK
+        int bag_id FK
+        float quantity_allocated_ml
+        date fulfillment_date
+    }
+
+    DONOR ||--o{ DONATION_LOG : "makes"
+    DONATION_LOG ||--|| BLOOD_BAG : "becomes"
+    RECIPIENT ||--o{ TRANSFUSION_REQ : "requests"
+    TRANSFUSION_REQ ||--o{ FULFILLMENT_LOG : "fulfilled_by"
+    BLOOD_BAG ||--o{ FULFILLMENT_LOG : "supplies"
