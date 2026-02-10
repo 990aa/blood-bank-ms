@@ -1,24 +1,55 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<!-- 1. Critical Alerts Section -->
+{% if alerts %}
 <div class="row mb-4">
-    <div class="col-12 text-center">
-        <h1 class="display-5 fw-bold text-dark">Blood Bank Dashboard</h1>
-        <p class="lead text-muted">Real-time inventory management</p>
+    <div class="col-12">
+        <div class="alert alert-danger shadow-sm d-flex justify-content-between align-items-center">
+            <div>
+                <h4 class="alert-heading fw-bold"><i class="bi bi-exclamation-triangle-fill"></i> CRITICAL SHORTAGES
+                    DETECTED</h4>
+                <ul class="mb-0">
+                    {% for alert in alerts %}
+                    <li><strong>{{ alert.requested_group }}</strong> needed urgently: {{ alert.total_needed }} ml</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <!-- Global Allocate Action for Critical Context -->
+            <form action="{{ url_for('allocate_all') }}" method="POST">
+                <button type="submit" class="btn btn-dark btn-lg fw-bold pulse-button">
+                    ⚠️ ALLOCATE RESOURCES NOW
+                </button>
+            </form>
+        </div>
     </div>
 </div>
+{% else %}
+<!-- Standard Header if no critical alerts -->
+<div class="row mb-4 align-items-center">
+    <div class="col-md-8">
+        <h1 class="display-5 fw-bold text-dark">Blood Bank Dashboard</h1>
+        <p class="lead text-muted">Real-time inventory & allocation system</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <form action="{{ url_for('allocate_all') }}" method="POST">
+            <button type="submit" class="btn btn-primary btn-lg shadow-sm">
+                Run Allocation Algorithm
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
 
-<div class="row g-4">
+<!-- 2. Stock Ticker (Summary) -->
+<div class="row g-4 mb-5">
     {% for item in inventory %}
     <div class="col-md-3">
-        <div class="card h-100 shadow-sm border-{{ 'danger' if item.count < 5 else 'success' }}">
+        <div class="card h-100 shadow-sm border-{{ 'danger' if item.total_vol < 1000 else 'success' }}">
             <div class="card-body text-center">
                 <h2 class="display-4 fw-bold">{{ item.blood_group }}</h2>
-                <p class="fs-4">{{ item.count }} <span class="text-muted fs-6">Units</span></p>
-                {% if item.count < 3 %} <span class="badge bg-danger">CRITICAL</span>
-                    {% else %}
-                    <span class="badge bg-success">HEALTHY</span>
-                    {% endif %}
+                <p class="fs-5 mb-0">{{ item.total_vol }} <small class="text-muted">ml</small></p>
+                <p class="text-muted small">{{ item.bag_count }} Bags</p>
             </div>
         </div>
     </div>
@@ -28,4 +59,143 @@
     </div>
     {% endfor %}
 </div>
+
+<!-- 3. Detailed Views (Tabs) -->
+<ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory"
+            type="button">Detailed Inventory</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="kivixa-history-tab" data-bs-toggle="tab" data-bs-target="#history"
+            type="button">Donation History</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="fulfilled-tab" data-bs-toggle="tab" data-bs-target="#fulfilled"
+            type="button">Fulfilled Requests</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="myTabContent">
+    <!-- Detailed Inventory -->
+    <div class="tab-pane fade show active" id="inventory">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Bag ID</th>
+                        <th>Group</th>
+                        <th>Current Vol / Initial Vol</th>
+                        <th>Deduction Trace</th>
+                        <th>Status</th>
+                        <th>Expiry Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bag in full_inventory %}
+                    <tr>
+                        <td>#{{ bag.bag_id }}</td>
+                        <td><span class="badge bg-secondary">{{ bag.blood_group }}</span></td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="progress flex-grow-1 me-2" style="height: 10px; width: 100px;">
+                                    <div class="progress-bar bg-danger" role="progressbar"
+                                        style="width: {{ (bag.current_volume_ml / bag.initial_volume_ml) * 100 }}%">
+                                    </div>
+                                </div>
+                                <small>{{ bag.current_volume_ml }} / {{ bag.initial_volume_ml }} ml</small>
+                            </div>
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                Used: {{ bag.initial_volume_ml - bag.current_volume_ml }} ml
+                            </small>
+                        </td>
+                        <td>{{ bag.status }}</td>
+                        <td>{{ bag.expiry_date }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Donation History -->
+    <div class="tab-pane fade" id="history">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Donor</th>
+                        <th>Quantity</th>
+                        <th>Log ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in donations %}
+                    <tr>
+                        <td>{{ d.donation_date }}</td>
+                        <td>{{ d.name }}</td>
+                        <td>{{ d.quantity_ml }} ml</td>
+                        <td>#{{ d.donation_id }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Fulfilled Requests -->
+    <div class="tab-pane fade" id="fulfilled">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Recipient</th>
+                        <th>Request</th>
+                        <th>Allocated From Bag</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in fulfilled %}
+                    <tr>
+                        <td>{{ f.fulfillment_date }}</td>
+                        <td>{{ f.recipient_name }}</td>
+                        <td>
+                            {{ f.requested_group }}
+                            {% if f.urgency_level == 'Critical' %}<span class="badge bg-danger">Critical</span>{% endif
+                            %}
+                        </td>
+                        <td>#{{ f.bag_id }}</td>
+                        <td>{{ f.quantity_allocated_ml }} ml</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pulse-button {
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.05);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+</style>
 {% endblock %}

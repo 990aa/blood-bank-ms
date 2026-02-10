@@ -3,21 +3,18 @@ import pytest
 import sqlite3
 import os
 from datetime import date
-from app.logic import get_compatible_blood_groups, smart_match_blood, process_donation, allocate_blood
+from app.logic import smart_allocate_all, process_donation
 from db_init import init_db
+import db
 
-# Mock DB connection for tests or use a test DB file
-TEST_DB = 'bloodbank_test.db'
+TEST_DB = 'bloodbank_test_advanced.db'
 
 @pytest.fixture
 def setup_db():
-    # Setup
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
     
-    # Override the DB_NAME in db.py specifically for tests
-    # This is a bit hacky without a proper config injection, but simple for this script
-    import db
+    # Override DB Name
     original_db_name = db.DB_NAME
     db.DB_NAME = TEST_DB
     
@@ -26,99 +23,120 @@ def setup_db():
     conn = db.get_db_connection()
     yield conn
     
-    # Teardown
     conn.close()
     db.DB_NAME = original_db_name
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
 
-def test_compatibility():
-    assert 'O-' in get_compatible_blood_groups('A+')
-    assert 'A+' in get_compatible_blood_groups('A+')
-    assert 'B+' not in get_compatible_blood_groups('A+')
-    assert ['O-'] == get_compatible_blood_groups('O-')
-
-def test_process_donation(setup_db):
+def test_granular_allocation(setup_db):
     conn = setup_db
     
-    # Create a donor
-    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('John Doe', 'A+')")
-    conn.commit()
-    donor_id = conn.execute("SELECT donor_id FROM DONOR WHERE name='John Doe'").fetchone()['donor_id']
+    # 1. Create Donor and Donate 450ml
+    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D1', 'A+')")
+    d1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    process_donation(d1, 450)
     
-    # Process Donation
-    success, msg = process_donation(donor_id, 450)
-    assert success is True
+    # 2. Add Recipient
+    conn.execute("INSERT INTO RECIPIENT (name, hospital_name) VALUES ('H1', 'City Generic')")
+    r1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     
-    # Verify Inventory
+    # 3. Create Request for 200ml (Should partially take from bag)
+    conn.execute("""
+        INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, quantity_ml, urgency_level, req_date) 
+        VALUES (?, 'A+', 200, 'Normal', DATE('now'))
+    """, (r1,))
+    
+    # Run Allocation
+    smart_allocate_all()
+    
+    # Verify
+    # Bag details
     bag = conn.execute("SELECT * FROM BLOOD_BAG").fetchone()
-    assert bag is not None
-    assert bag['blood_group'] == 'A+'
+    assert bag['initial_volume_ml'] == 450
+    assert bag['current_volume_ml'] == 250 # 450 - 200
     assert bag['status'] == 'Available'
     
-    # Verify Donor Update
-    donor = conn.execute("SELECT last_donation_date FROM DONOR WHERE donor_id=?", (donor_id,)).fetchone()
-    assert donor['last_donation_date'] == str(date.today())
-
-def test_smart_match_fifo(setup_db):
-    conn = setup_db
-    
-    # Create Donor
-    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D1', 'A+')")
-    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D2', 'O+')") # Compatible with A+
-    conn.commit()
-    
-    d1 = conn.execute("SELECT donor_id FROM DONOR WHERE name='D1'").fetchone()['donor_id']
-    d2 = conn.execute("SELECT donor_id FROM DONOR WHERE name='D2'").fetchone()['donor_id']
-
-    # Insert log entries manually to control dates
-    conn.execute("INSERT INTO DONATION_LOG (donor_id, donation_date, quantity_ml) VALUES (?, '2023-01-01', 450)", (d1,))
-    log1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    
-    conn.execute("INSERT INTO DONATION_LOG (donor_id, donation_date, quantity_ml) VALUES (?, '2023-01-02', 450)", (d2,))
-    log2 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    # Bag 1: A+ (Matches Exact), Expires later
-    conn.execute("INSERT INTO BLOOD_BAG (donation_id, blood_group, collection_date, expiry_date, status) VALUES (?, 'A+', '2023-01-01', '2023-02-10', 'Available')", (log1,))
-    bag1_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    # Bag 2: O+ (Matches Compatible), Expires SOONER
-    conn.execute("INSERT INTO BLOOD_BAG (donation_id, blood_group, collection_date, expiry_date, status) VALUES (?, 'O+', '2023-01-01', '2023-02-01', 'Available')", (log2,))
-    bag2_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    
-    conn.commit()
-    conn.close()
-
-    # Smart Match for A+ Request
-    # Should pick Bag 2 (O+) because it expires sooner (2023-02-01 vs 2023-02-10)
-    matched_bag_id = smart_match_blood('A+')
-    assert matched_bag_id == bag2_id
-
-def test_allocate_transaction(setup_db):
-    conn = setup_db
-    
-    # Seed Data
-    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D1', 'A+')")
-    donor_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    process_donation(donor_id, 450)
-    
-    conn.execute("INSERT INTO RECIPIENT (name, hospital_name) VALUES ('R1', 'H1')")
-    rec_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    
-    conn.execute("INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, req_date) VALUES (?, 'A+', ?)", (rec_id, date.today()))
-    req_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.commit()
-    conn.close() # Close to allow logic to open its own
-    
-    # Allocate
-    success, msg = allocate_blood(req_id)
-    assert success is True
-    
-    # Verify Updates
-    conn = db.get_db_connection()
-    req = conn.execute("SELECT status FROM TRANSFUSION_REQ WHERE req_id=?", (req_id,)).fetchone()
+    # Request Status
+    req = conn.execute("SELECT * FROM TRANSFUSION_REQ").fetchone()
     assert req['status'] == 'Fulfilled'
     
-    bag = conn.execute("SELECT status FROM BLOOD_BAG").fetchone()
-    assert bag['status'] == 'Issued'
-    conn.close()
+    # Fulfillment Log
+    log = conn.execute("SELECT * FROM FULFILLMENT_LOG").fetchone()
+    assert log['quantity_allocated_ml'] == 200
+    assert log['bag_id'] == bag['bag_id']
+
+def test_prioritization_criticality(setup_db):
+    conn = setup_db
+    
+    # 1. Donate 450ml A+
+    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D1', 'A+')")
+    d1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    process_donation(d1, 450)
+    
+    conn.execute("INSERT INTO RECIPIENT (name, hospital_name) VALUES ('H1', 'Generic')")
+    r1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    
+    # 2. Create Two Requests
+    # Req A: Normal, 100ml
+    conn.execute("""
+        INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, quantity_ml, urgency_level, status) 
+        VALUES (?, 'A+', 100, 'Normal', 'Pending')
+    """, (r1,))
+    req_normal_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    
+    # Req B: Critical, 400ml (Note: Only 450 available. If Normal runs first, 350 left. Critical needs 400 -> Fails if strict)
+    # If Critical runs first, it takes 400. 50 Left. Normal needs 100 -> Fails.
+    # So we expect Critical to be Filled, Normal to be Pending.
+    conn.execute("""
+        INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, quantity_ml, urgency_level, status) 
+        VALUES (?, 'A+', 400, 'Critical', 'Pending')
+    """, (r1,))
+    req_critical_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    
+    # Run Allocation
+    smart_allocate_all()
+    
+    # Check Critical Request
+    critical_status = conn.execute("SELECT status FROM TRANSFUSION_REQ WHERE req_id=?", (req_critical_id,)).fetchone()['status']
+    assert critical_status == 'Fulfilled'
+    
+    # Check Normal Request
+    normal_status = conn.execute("SELECT status FROM TRANSFUSION_REQ WHERE req_id=?", (req_normal_id,)).fetchone()['status']
+    assert normal_status == 'Pending' # Because only 50ml left, needed 100ml
+
+def test_prioritization_quantity(setup_db):
+    conn = setup_db
+    
+    # Donate 500ml total (2 bags of 250ml)
+    conn.execute("INSERT INTO DONOR (name, blood_group) VALUES ('D1', 'A+')")
+    d1 = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    process_donation(d1, 250)
+    process_donation(d1, 250)
+    
+    r1 = 1 # Dummy ID works if we loose strict FK for a sec or insert it
+    conn.execute("INSERT INTO RECIPIENT (recipient_id, name, hospital_name) VALUES (1, 'H1', 'Gen')")
+    
+    # Req A: Normal, 300ml.
+    # Req B: Normal, 150ml.
+    # Total Supply: 500ml. Needed: 450ml. Both can be filled? 
+    # Wait, let's make it scarce.
+    # Supply: 250ml.
+    # Req A: 200ml. Req B: 100ml.
+    # If A runs first (Higher Quantity), it takes 200. Left 50. B fails.
+    # If B runs first? It takes 100. Left 150. A fails.
+    # Rules say: "Prioritize ... patient who needs MORE blood." -> A should win.
+    
+    # Wipe bags, add just one 250ml bag
+    conn.execute("DELETE FROM BLOOD_BAG")
+    conn.execute("INSERT INTO BLOOD_BAG (donation_id, blood_group, collection_date, expiry_date, initial_volume_ml, current_volume_ml, status) VALUES (1, 'A+', '2023-01-01', '2024-01-01', 250, 250, 'Available')")
+    
+    conn.execute("INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, quantity_ml, urgency_level, status, req_date) VALUES (1, 'A+', 200, 'Normal', 'Pending', DATE('now'))")
+    req_big = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    
+    conn.execute("INSERT INTO TRANSFUSION_REQ (recipient_id, requested_group, quantity_ml, urgency_level, status, req_date) VALUES (1, 'A+', 100, 'Normal', 'Pending', DATE('now'))")
+    req_small = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    
+    smart_allocate_all()
+    
+    assert conn.execute("SELECT status FROM TRANSFUSION_REQ WHERE req_id=?", (req_big,)).fetchone()['status'] == 'Fulfilled'
+    assert conn.execute("SELECT status FROM TRANSFUSION_REQ WHERE req_id=?", (req_small,)).fetchone()['status'] == 'Pending'
