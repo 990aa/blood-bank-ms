@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <!-- Request Form -->
+    <div class="col-md-4">
+        <div class="card p-4">
+            <h4>New Transfusion Request</h4>
+            <form method="POST">
+                <input type="hidden" name="request_blood" value="true">
+                <div class="mb-3">
+                    <label>Recipient (Hospital/Patient)</label>
+                    <select name="recipient_id" class="form-select" required>
+                        {% for recipient in recipients %}
+                        <option value="{{ recipient.recipient_id }}">{{ recipient.name }} - {{ recipient.hospital_name
+                            }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label>Required Blood Group</label>
+                    <select name="blood_group" class="form-select" required>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label>Urgency</label>
+                    <select name="urgency" class="form-select">
+                        <option value="Normal">Normal</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-warning w-100">Submit Request</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Active Requests -->
+    <div class="col-md-8">
+        <div class="card p-4">
+            <h4>Active Requests</h4>
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Request</th>
+                        <th>Hospital</th>
+                        <th>Group</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in requests %}
+                    <tr>
+                        <td>#{{ req.req_id }}</td>
+                        <td>{{ req.recipient_name }}</td>
+                        <td><span class="badge bg-danger">{{ req.requested_group }}</span></td>
+                        <td>
+                            {% if req.status == 'Fulfilled' %}
+                            <span class="badge bg-success">Fulfilled</span> <small class="text-muted">Bag #{{
+                                req.assigned_bag_id }}</small>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if req.status == 'Pending' %}
+                            <form method="POST">
+                                <input type="hidden" name="allocate" value="true">
+                                <input type="hidden" name="req_id" value="{{ req.req_id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-success">Auto-Allocate</button>
+                            </form>
+                            {% else %}
+                            <button class="btn btn-sm btn-light" disabled>Done</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
