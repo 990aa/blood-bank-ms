@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <!-- Registration Form -->
+    <div class="col-md-4">
+        <div class="card p-4">
+            <h4>Register New Donor</h4>
+            <form method="POST">
+                <input type="hidden" name="register" value="true">
+                <div class="mb-3">
+                    <label>Full Name</label>
+                    <input type="text" name="name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Blood Group</label>
+                    <select name="blood_group" class="form-select" required>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label>Phone</label>
+                    <input type="text" name="phone" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-brand w-100">Register Donor</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Donation Log -->
+    <div class="col-md-8">
+        <div class="card p-4">
+            <h4>Log Donation</h4>
+            <form method="POST" class="row g-3">
+                <input type="hidden" name="donate" value="true">
+                <div class="col-md-6">
+                    <label>Select Donor</label>
+                    <select name="donor_id" class="form-select" required>
+                        {% for donor in donors %}
+                        <option value="{{ donor.donor_id }}">{{ donor.name }} ({{ donor.blood_group }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label>Quantity (ml)</label>
+                    <input type="number" name="quantity" class="form-control" value="450" required>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Save</button>
+                </div>
+            </form>
+
+            <hr>
+            <h5 class="mt-4">Registered Donors</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Group</th>
+                        <th>Last Donation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for donor in donors %}
+                    <tr>
+                        <td>{{ donor.donor_id }}</td>
+                        <td>{{ donor.name }}</td>
+                        <td><span class="badge bg-secondary">{{ donor.blood_group }}</span></td>
+                        <td>{{ donor.last_donation_date or 'Never' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
