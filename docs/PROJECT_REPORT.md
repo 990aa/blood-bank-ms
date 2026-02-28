@@ -1,185 +1,319 @@
-# Blood Bank Management System - Project Report
+# Blood Bank Management System — Project Report
 
 ## Abstract
-Blood Bank Management Systems (BBMS) are critical infrastructure in modern healthcare, ensuring the timely availability of life-saving blood components. Traditional manual or semi-automated systems often suffer from inventory inaccuracies, lack of real-time visibility, and inefficient allocation strategies that lead to blood wastage due to expiration or improper prioritization. This project presents a comprehensive, web-based Blood Bank Management System designed to address these challenges through granular volume tracking and an intelligent "Smart Allocation" algorithm.
 
-Unlike conventional systems that track blood units as discrete integers, this system implements a continuous volume tracking mechanism (in milliliters), allowing for partial usage of blood bags and precise inventory management. The core innovation lies in its allocation logic, which strictly prioritizes requests based on medical urgency ("Critical" vs. "Normal") and optimizes stock usage using a First-In-First-Out (FIFO) strategy based on expiry dates. This ensures that the oldest available compatible blood is used first, significantly reducing wastage.
+Blood Bank Management Systems (BBMS) are critical infrastructure in modern healthcare, ensuring the timely availability of life-saving blood components. Traditional manual or semi-automated systems often suffer from inventory inaccuracies, lack of real-time visibility, and inefficient allocation strategies that lead to blood wastage due to expiration or improper prioritisation. This project presents a comprehensive, web-based Blood Bank Management System designed to address these challenges through granular volume tracking (ml-level), an intelligent "Smart Allocation" algorithm with cross-match compatibility scoring, predictive shortage forecasting, component-level inventory management, and a full forensic audit trail.
 
-The system is built using Python with the Flask framework, leveraging a robust SQLite relational database to maintain data integrity. It features distinct modules for donor management, hospital/recipient coordination, and real-time inventory monitoring. The user interface provides a live dashboard with critical alerts, enabling administrators to make informed decisions instantly. This report details the system's architecture, database design, and implementation strategies, demonstrating a scalable solution for modernizing blood bank operations.
+The system is built using Python with the Flask framework, leveraging a robust SQLite relational database with **13 tables, 3 views, and 10 triggers** to enforce data integrity at the database level. It features 10 major DBMS enhancements beyond a basic CRUD application, including domain normalisation via foreign-key-enforced lookup tables, partial fulfillment tracking, soft deletes, donor loyalty scoring, and predictive analytics. A comprehensive test suite of **95 automated tests** validates all features including edge cases, stress tests, and full route integration tests.
+
+---
 
 ## Synopsis
-The Blood Bank Management System is a centralized platform designed to bridge the gap between blood donors and hospitals in need. The system facilitates the entire lifecycle of blood donation and transfusion:
-1.  **Donation Processing:** Donors are registered with their unique blood groups. Every donation is recorded with a specific milliliter volume, which automatically populates the inventory as a distinct "Blood Bag" with a 42-day lifespan.
-2.  **Granular Inventory:** The system monitors the `current_volume_ml` of every bag in the bank. This allows the system to handle complex fulfillment scenarios where a single bag can be split across multiple smaller requests.
-3.  **Request Management:** Hospitals log transfusion requests including the specific blood group needed, the volume required for the patient, and a triaged urgency level.
-4.  **Smart Allocation Algorithm:** The system's core engine automates the matching of compatible blood groups and the distribution of stock based on medical priority and expiry proximity.
-5.  **Traceability:** Every allocation is logged in a fulfillment history, mapping which bag provided how much volume to which specific hospital request.
+
+The Blood Bank Management System is a centralised platform designed to bridge the gap between blood donors and hospitals in need. The system facilitates the entire lifecycle of blood donation and transfusion:
+
+1. **Donation Processing:** Donors are registered with their unique blood groups. Every donation is recorded with a specific millilitre volume, which automatically populates the inventory as distinct "Blood Bag" records with calculated expiry dates based on component type.
+2. **Component Tracking:** A single donation can be split into Red Blood Cells (42-day shelf life, 200ml), Platelets (5-day shelf life, 50ml), and Plasma (365-day shelf life, 200ml) — each tracked independently.
+3. **Granular Inventory:** The system monitors the `current_volume_ml` of every bag, allowing partial usage across multiple requests and precise ml-level deduction tracking.
+4. **Request Management:** Hospitals log transfusion requests including the specific blood group, component type, volume, and triaged urgency level (Normal/Critical).
+5. **Smart Allocation Algorithm:** The core engine automates matching using a **27-row compatibility matrix** with preference ranking, prioritises by urgency then quantity, and uses FIFO expiry ordering to minimise waste.
+6. **Partial Fulfillment:** Requests can be incrementally filled across multiple allocation rounds, with real-time progress tracking (Pending → Partially Fulfilled → Fulfilled).
+7. **Predictive Analytics:** A shortage alert engine projects stock-days remaining based on rolling 30-day consumption averages.
+8. **Audit Trail:** Every INSERT and UPDATE on sensitive tables is automatically logged via database triggers for full forensic traceability.
+
+---
 
 ## Problem Statement
+
 Traditional blood bank management faces several systemic hurdles:
-*   **Inventory Inaccuracy:** Units are often treated as indivisible blocks. If a patient only needs 200ml of a 450ml bag, the remaining 250ml is often poorly tracked or wasted.
-*   **Wastage through Expiration:** Without automated FIFO (First-In-First-Out) enforcement, newer donations may be used while older stock expires unnoticed.
-*   **Priority Management:** In supply shortages, manual systems struggle to dynamically prioritize a "Critical" trauma patient over "Normal" elective procedures.
-*   **Compatibility Risks:** Manual cross-matching of compatible groups (e.g., O- as a universal donor) introduces the risk of human error in high-pressure environments.
-*   **Lack of Real-time Visibility:** Administrators often lack a "single pane of glass" view of total volume available across different blood groups and pending critical needs.
+
+- **Inventory Inaccuracy:** Units are often treated as indivisible blocks. If a patient only needs 200ml of a 450ml bag, the remaining 250ml is often poorly tracked or wasted.
+- **Wastage through Expiration:** Without automated FIFO (First-In-First-Out) enforcement, newer donations may be used while older stock expires unnoticed.
+- **Priority Management:** In supply shortages, manual systems struggle to dynamically prioritise a "Critical" trauma patient over "Normal" elective procedures.
+- **Compatibility Risks:** Manual cross-matching of compatible groups (e.g., O− as a universal donor) introduces human error risk and wastes precious universal-donor blood on patients who could receive closer matches.
+- **Lack of Real-time Visibility:** Administrators lack a "single pane of glass" view of total volume available across blood groups and pending critical needs.
+- **No Predictive Capability:** Traditional systems cannot forecast upcoming shortages based on consumption trends.
+- **Component Blindness:** Systems that track "units" cannot distinguish between whole blood, red blood cells, platelets, and plasma — each with vastly different shelf lives and clinical uses.
+- **Poor Traceability:** Without automated audit logging, tracking who changed what and when requires manual record-keeping.
+
+---
 
 ## Implementation Plan
+
 The project was executed through a structured development methodology:
-1.  **Requirement Analysis:** Defining the specific entities (Donors, Bags, Requests) and the mathematical rules for blood compatibility.
-2.  **Database Architecture:** Designing a relational schema in SQLite that enforces data integrity through Foreign Keys and transactional boundaries.
-3.  **Backend Logic Development:** Implementing the core Python engine for processing donations and the smart allocation loop.
-4.  **Web Interface Integration:** Developing a Flask-based application to serve dynamic HTML content and handle form submissions.
-5.  **UI/UX Refinement:** Organizing the dashboard to highlight "Critical Alerts" and current stock levels for immediate administrative action.
+
+1. **Requirement Analysis:** Defining entities (Donors, Bags, Requests, Components) and mathematical rules for blood compatibility, shelf-life calculation, and allocation priority.
+2. **Database Architecture:** Designing a relational schema in SQLite with 13 tables, enforcing integrity through foreign keys, triggers, and domain-normalised lookup tables.
+3. **Trigger & View Engineering:** Implementing 10 database triggers for automated business rule enforcement and 3 views for real-time computed summaries.
+4. **Backend Logic Development:** Building the Python engine for donation processing, component splitting, smart allocation with compatibility scoring, and predictive analytics.
+5. **Web Interface Integration:** Developing a Flask application with 5 routes serving dynamic HTML dashboards.
+6. **Testing & Quality Assurance:** Writing 95 automated tests covering all features, edge cases, stress scenarios, and route integration.
+7. **Documentation & Demo Preparation:** Creating seed data scripts, demo guides, and comprehensive documentation.
+
+---
 
 ## Project Member
-*   **Abdul Ahad**
+
+- **Abdul Ahad**
 
 ---
 
 ## ER Design
 
 ### ER Diagram
-![ER Diagram](er_diagram.png)
+
+The complete ER diagram is available in `docs/er_diagram.mmd` (Mermaid format).
 
 ### Description of Entities
-1.  **DONOR:** Stores the master record of donors, including their name, contact details, and unique blood group. It also maintains a `last_donation_date` to ensure compliance with medical safety intervals.
-2.  **RECIPIENT:** Represents the hospitals or medical centers requiring blood. It captures the facility name and contact information for logistics and coordination.
-3.  **DONATION_LOG:** A bridge table that records the actual event of a donation. It captures the date and the specific volume (quantity_ml) collected from a donor.
-4.  **BLOOD_BAG:** The inventory tracking entity. Every record here represents a physical bag of blood. It links back to a `donation_id` and tracks its `expiry_date`, `initial_volume_ml`, and `current_volume_ml`.
-5.  **TRANSFUSION_REQ:** Represents a pending hospital request. It includes the `requested_group`, `quantity_ml`, `urgency_level` (Normal/Critical), and the current `status` (Pending/Fulfilled).
-6.  **FULFILLMENT_LOG:** The audit trail table. It records the precise allocation of milliliters from a specific `bag_id` to a specific `req_id`, ensuring 1:N and N:M fulfillment scenarios are fully documented.
 
-### Normalized Tables
-The database is structured in 3rd Normal Form (3NF) to prevent data redundancy and ensure consistency:
-*   **DONOR** (`donor_id` PK, `name`, `blood_group`, `phone`, `email`, `last_donation_date`)
-*   **RECIPIENT** (`recipient_id` PK, `name`, `hospital_name`, `contact_info`)
-*   **DONATION_LOG** (`donation_id` PK, `donor_id` FK, `donation_date`, `quantity_ml`)
-*   **BLOOD_BAG** (`bag_id` PK, `donation_id` FK, `blood_group`, `collection_date`, `expiry_date`, `initial_volume_ml`, `current_volume_ml`, `status`)
-*   **TRANSFUSION_REQ** (`req_id` PK, `recipient_id` FK, `requested_group`, `quantity_ml`, `urgency_level`, `req_date`, `status`)
-*   **FULFILLMENT_LOG** (`fulfillment_id` PK, `req_id` FK, `bag_id` FK, `quantity_allocated_ml`, `fulfillment_date`)
+#### Master/Lookup Tables (Domain Normalisation — Item 4)
+
+1. **BLOOD_GROUP_MASTER:** Single-column lookup containing the 8 valid ABO/Rh blood groups. All blood group references in other tables are foreign-keyed to this master, preventing typos like "A positive" vs "A+".
+2. **URGENCY_LEVEL_MASTER:** Constrains urgency to exactly "Normal" or "Critical".
+3. **BAG_STATUS_MASTER:** Valid statuses: Available, Empty, Expired, Quarantined.
+4. **REQUEST_STATUS_MASTER:** Valid statuses: Pending, Partially Fulfilled, Fulfilled, Cancelled.
+5. **COMPONENT_MASTER:** Blood component types with their shelf life in days. Contains: Whole Blood (42d), Red Blood Cells (42d), Platelets (5d), Plasma (365d), Cryoprecipitate (365d).
+6. **COMPATIBILITY_MATRIX:** A 27-row table encoding which donor blood groups are compatible with which recipient groups, with a `preference_rank` column (lower = preferred). This ensures the allocation engine uses exact matches first and conserves O− universal-donor blood.
+
+#### Core Tables
+
+7. **DONOR:** Master record of donors including name, blood group (FK to BLOOD_GROUP_MASTER), phone, email, `last_donation_date`, and `is_active` flag for soft deletes (Item 6).
+8. **RECIPIENT:** Hospitals/medical centres with name, hospital name, contact info, and `is_active` flag for soft deletes.
+9. **DONATION_LOG:** Records the event of a donation — donor_id, date, and volume in ml.
+10. **BLOOD_BAG:** Inventory tracking entity. Links to donation_id, tracks blood_group, `component_type` (FK to COMPONENT_MASTER — Item 5), collection/expiry dates, `initial_volume_ml`, `current_volume_ml`, and status (FK to BAG_STATUS_MASTER).
+11. **TRANSFUSION_REQ:** Hospital requests with `requested_group`, `requested_component`, `quantity_ml`, `quantity_allocated_ml` (for partial fulfillment — Item 10), `urgency_level`, and `status`.
+12. **FULFILLMENT_LOG:** N:M join table between requests and bags, recording quantity_allocated_ml per bag per request. Enables one request to be filled from multiple bags, and one bag to serve multiple small requests.
+13. **AUDIT_LOG:** Forensic trail capturing action_type (INSERT/UPDATE), table_name, record_id, old_value, new_value, timestamp, and performed_by (Item 3).
+
+### Normalised Tables
+
+The database is structured in **Third Normal Form (3NF)**:
+
+- **BLOOD_GROUP_MASTER** (`blood_group` PK)
+- **URGENCY_LEVEL_MASTER** (`urgency_level` PK)
+- **BAG_STATUS_MASTER** (`status` PK)
+- **REQUEST_STATUS_MASTER** (`status` PK)
+- **COMPONENT_MASTER** (`component_type` PK, `shelf_life_days`)
+- **COMPATIBILITY_MATRIX** (`recipient_group` PK/FK, `donor_group` PK/FK, `preference_rank`)
+- **DONOR** (`donor_id` PK, `name`, `blood_group` FK, `phone`, `email`, `last_donation_date`, `is_active`)
+- **RECIPIENT** (`recipient_id` PK, `name`, `hospital_name`, `contact_info`, `is_active`)
+- **DONATION_LOG** (`donation_id` PK, `donor_id` FK, `donation_date`, `quantity_ml`)
+- **BLOOD_BAG** (`bag_id` PK, `donation_id` FK, `blood_group` FK, `component_type` FK, `collection_date`, `expiry_date`, `initial_volume_ml`, `current_volume_ml`, `status` FK)
+- **TRANSFUSION_REQ** (`req_id` PK, `recipient_id` FK, `requested_group` FK, `requested_component` FK, `quantity_ml`, `quantity_allocated_ml`, `urgency_level` FK, `req_date`, `status` FK)
+- **FULFILLMENT_LOG** (`fulfillment_id` PK, `req_id` FK, `bag_id` FK, `quantity_allocated_ml`, `fulfillment_date`)
+- **AUDIT_LOG** (`log_id` PK, `action_type`, `table_name`, `record_id`, `old_value`, `new_value`, `timestamp`, `performed_by`)
+
+---
+
+## Database Triggers (10)
+
+### Trigger 1: `trg_auto_expire_bag` (Item 1)
+**Type:** AFTER UPDATE ON BLOOD_BAG  
+**Purpose:** Automatically sets bag status to "Empty" when `current_volume_ml` drops to 0 or below.  
+**Mechanism:** Fires after every volume update. When the new volume ≤ 0 and status ≠ 'Empty', it updates the status. This uses `PRAGMA recursive_triggers = ON` so the status change fires the audit trigger.
+
+### Trigger 2: `trg_donation_safety_lock` (Item 1)
+**Type:** BEFORE INSERT ON DONATION_LOG  
+**Purpose:** Enforces the medical 56-day minimum interval between donations.  
+**Mechanism:** Checks the donor's `last_donation_date` and calculates the Julian day difference. If < 56 days, it raises an ABORT with message `DONATION_SAFETY`.
+
+### Trigger 3: `trg_fulfillment_volume_guard` (Item 1)
+**Type:** BEFORE INSERT ON FULFILLMENT_LOG  
+**Purpose:** Prevents allocating more blood than a bag actually contains.  
+**Mechanism:** Compares `NEW.quantity_allocated_ml` against the bag's `current_volume_ml`. If the allocation exceeds available volume, it raises ABORT with message `VOLUME_GUARD`.
+
+### Trigger 4: `trg_update_req_allocated` (Item 10)
+**Type:** AFTER INSERT ON FULFILLMENT_LOG  
+**Purpose:** Automatically updates the transfusion request's `quantity_allocated_ml` and `status` after each fulfillment.  
+**Mechanism:** Sums all fulfillment log entries for the request. If total ≥ requested quantity → "Fulfilled"; if total > 0 but < requested → "Partially Fulfilled".
+
+### Triggers 5–10: Audit Trail Triggers (Item 3)
+Six triggers on BLOOD_BAG, TRANSFUSION_REQ, DONATION_LOG, and FULFILLMENT_LOG:
+- `trg_audit_bag_insert` — logs new bag creation
+- `trg_audit_bag_update` — logs bag status/volume changes (old + new values)
+- `trg_audit_req_insert` — logs new transfusion requests
+- `trg_audit_req_update` — logs request status changes
+- `trg_audit_donation_insert` — logs new donations
+- `trg_audit_fulfillment_insert` — logs each allocation event
+
+---
+
+## SQL Views (3) — Item 2
+
+### View 1: `vw_inventory_summary`
+Aggregates available blood bags by blood group and component type, showing bag count and total volume. Excludes non-Available bags.
+
+### View 2: `vw_critical_pending`
+Joins TRANSFUSION_REQ with RECIPIENT to show all Critical urgency requests that are Pending or Partially Fulfilled, including the remaining ml needed and hospital details.
+
+### View 3: `vw_expiring_soon`
+Lists all Available bags expiring within 5 days, with a computed `days_until_expiry` column. Used for the dashboard warning banner.
+
+---
+
+## 10 Enhanced DBMS Features — Detailed Description
+
+### Item 1: Database Triggers
+Three business-rule-enforcing triggers operate at the database level, making them impossible to bypass from application code:
+- **Auto-expire:** When any bag's volume hits zero (through allocation or manual update), the trigger flips its status to "Empty" — no application code needed.
+- **Donation safety:** The 56-day rule is enforced with a BEFORE INSERT trigger that ABORTs the transaction if the donor donated too recently.
+- **Volume guard:** A BEFORE INSERT trigger on FULFILLMENT_LOG prevents allocating more than a bag contains.
+
+### Item 2: SQL Views
+Three views provide computed, real-time summaries used by the dashboard. They abstract complex JOINs and aggregations into simple `SELECT *` queries, improving code readability and maintainability.
+
+### Item 3: Audit Trail
+Six AFTER triggers on four tables automatically record every INSERT and UPDATE into the AUDIT_LOG table. Each entry captures the action type, table name, record ID, old value (for updates), new value, timestamp, and performing user. This creates a HIPAA-style forensic trail without any application-level code changes.
+
+### Item 4: Domain Normalisation
+Six master/lookup tables enforce data integrity through foreign keys. Invalid blood groups, urgency levels, bag statuses, request statuses, and component types are rejected at the database level. The COMPATIBILITY_MATRIX table stores blood group compatibility rules with preference ranking.
+
+### Item 5: Component Tracking
+The `process_donation()` function supports a `split_components` parameter. When True, a 450ml donation is split into:
+- Red Blood Cells: 200ml, 42-day shelf life
+- Platelets: 50ml, 5-day shelf life
+- Plasma: 200ml, 365-day shelf life
+
+Each component is stored as a separate BLOOD_BAG with the correct expiry date calculated from COMPONENT_MASTER's `shelf_life_days`.
+
+### Item 6: Soft Deletes
+Both DONOR and RECIPIENT tables have an `is_active` integer column (default 1). "Deleting" a record sets `is_active = 0`. The application logic filters on `is_active = 1` for all queries, but the data remains for audit and historical analysis. Previous donations and blood bags from deactivated donors are preserved.
+
+### Item 7: Predictive Shortage Alerts
+The `get_shortage_alerts()` function:
+1. Calculates current stock per blood group
+2. Computes average daily consumption (from FULFILLMENT_LOG over the past 30 days)
+3. Projects `stock_days = current_ml / avg_daily_consumption`
+4. Returns alerts for groups with < 3 days of projected supply
+
+The dashboard displays these alerts with suggested donors to contact (from the loyalty module).
+
+### Item 8: Cross-Match Compatibility Scoring
+The COMPATIBILITY_MATRIX table encodes 27 valid (recipient, donor) blood group pairs with a `preference_rank` column. The allocation engine sorts candidate bags by `preference_rank ASC`, ensuring:
+- **Exact matches used first** (e.g., A+ donor for A+ patient, rank 1)
+- **Compatible alternatives second** (e.g., O− for A+ patient, rank 4)
+- **O− universal donor blood conserved** — only used when no closer match exists
+
+This replicates real-world blood bank cross-matching protocols.
+
+### Item 9: Donor Loyalty Module
+The `get_donor_scores()` function calculates:
+- **Loyalty score** = `total_donations × 10 + rare_group_bonus`
+- **Rare group bonus**: O−, AB− → 10 points; A−, B− → 5 points; others → 0
+- **Eligibility**: Whether 56+ days have passed since last donation
+
+The donor page displays a leaderboard sorted by loyalty score, with badges for eligibility and rare blood group status.
+
+The `get_eligible_donors_for_group()` function finds the top eligible donors of a specific blood group, used by the shortage alert system to suggest donors to contact.
+
+### Item 10: Partial Fulfillment
+The `smart_allocate_all()` function allocates whatever blood is available, even if insufficient to fully satisfy a request. The `trg_update_req_allocated` trigger automatically:
+- Sums all FULFILLMENT_LOG entries for the request
+- Sets status to "Partially Fulfilled" if some (but not all) volume is allocated
+- Sets status to "Fulfilled" when the total meets or exceeds the requested quantity
+
+The hospital page shows progress bars indicating fulfillment percentage for each request.
+
+---
+
+## Algorithmic Logic: The "Smart Allocation" Engine
+
+The `smart_allocate_all` function in `app/logic.py` represents the computational core of the project:
+
+### Step 1: Priority Queue Construction
+Queries all Pending and Partially Fulfilled requests, sorted by:
+1. **Primary:** Urgency level (Critical = 1, Normal = 2)
+2. **Secondary:** Quantity needed (descending — larger volumes first)
+
+### Step 2: Compatibility-Ranked Bag Selection
+For each request, queries BLOOD_BAG joined with COMPATIBILITY_MATRIX:
+- Filters by: recipient_group match, status = Available, volume > 0, matching component type
+- Sorts by: `preference_rank ASC` (closest match first), then `expiry_date ASC` (FIFO)
+
+### Step 3: Volume Deduction Loop
+Iteratively allocates from sorted bags:
+1. Calculates `needed = requested_ml - already_allocated_ml`
+2. Takes `min(bag_volume, needed)` from each bag
+3. **Inserts FULFILLMENT_LOG first** (triggers: volume guard check, then req allocated update, then audit)
+4. **Then deducts bag volume** (triggers: auto-expire if volume → 0, then audit)
+5. Continues until request is fully filled or bags exhausted
+
+### Step 4: Transaction Safety
+The entire allocation is wrapped in a try/except with `conn.rollback()` on failure, ensuring atomicity.
 
 ---
 
 ## UI Design
-The interface is optimized for high-stakes administrative tasks, using a clean layout:
 
-1.  **Home Dashboard:**
-    *   **Alerts Section:** Displays "Critical Pending Alerts" in a bold ticker format. It aggregates the total volume needed for each blood group categorized as Critical.
-    *   **Inventory Table:** Shows the "Stock Ticker" which summarizes total bags and total volume available per blood group.
-    *   **Detailed Inventory:** A list of all available bags sorted by expiry, providing granular visibility into individual stock items.
-    *   **Transaction Logs:** Recent donations and recent fulfillments are shown to provide an immediate audit of daily activity.
+### Dashboard (`/`)
+- **Critical Alerts Banner:** Red alert with "ALLOCATE RESOURCES NOW" button when Critical requests exist
+- **Predictive Shortage Forecast:** Cards showing projected days of supply per blood group, with suggested donors to contact
+- **Expiring Soon Warning:** Table of bags expiring within 5 days
+- **Stock Ticker:** Summary cards per blood group showing bag count and total volume
+- **Tabbed Detail Views:** Detailed Inventory, By Component, Donation History, Fulfilled Requests, Audit Trail
 
-2.  **Donor Portal:**
-    *   **Registration:** A dedicated form for onboarding new donors.
-    *   **Donation Entry:** A panel that allows selecting an existing donor and recording a new donation quantity, which triggers the automatic creation of a Blood Bag and an update to the donor's last donation date.
+### Donor Portal (`/donor`)
+- **Registration Form:** Name, blood group (dropdown), phone
+- **Donation Log:** Select donor, quantity, optional component split checkbox
+- **Loyalty Leaderboard:** Table with donation count, total volume, score, eligibility badge, rare-group star, deactivate button
 
-3.  **Hospital Portal:**
-    *   **Hospital Management:** Form to register new medical facilities.
-    *   **Request Entry:** Interface to log transfusion needs, requiring volume in ml and an urgency selection.
+### Hospital Portal (`/hospital`)
+- **Add Hospital Form:** Contact person, hospital name, contact info
+- **Request Blood Form:** Recipient dropdown, blood group, urgency, component type, quantity
+- **Prioritised Waitlist:** Table sorted by urgency then quantity, with progress bars showing fulfillment percentage
+
+### Audit Trail (`/audit`)
+- **Full Log Table:** Timestamp, action type badges (INSERT=green, UPDATE=blue), table name, record ID, old/new values, performed by
 
 ---
 
-## Detailed Report
+## Testing
 
-### 1. Introduction
-The management of blood inventory is one of the most complex challenges in modern medical logistics. Unlike pharmaceutical drugs, blood is a living tissue with a strictly limited shelf life (typically 42 days for red blood cells). It cannot be manufactured and relies entirely on human donations. Furthermore, the demand for blood is highly stochastic; a single traffic accident or major surgery can deplete a hospital's stock of a specific blood group in minutes.
+The project includes **95 automated tests** organised into 13 test classes:
 
-The primary objective of this project, the **Blood Bank Management System (BBMS)**, is to digitize and optimize these operations. The project moves beyond simple record-keeping to provide an **Active Decision Support System**. It addresses the "Unit vs. Volume" dichotomy—where traditional systems track "1 Unit" regardless of whether it is 350ml or 450ml—by implementing precise volume tracking. This granularity allows for the optimization of resource usage, especially in pediatric cases where small aliquots are needed, preventing the wastage of the remainder of a full adult unit.
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestGranularAllocation | 4 | ml-level tracking, exact drain, multi-bag, no-stock |
+| TestPrioritization | 3 | Critical vs Normal, quantity ordering, multiple critical |
+| TestTriggers | 8 | Auto-expire, negative volume, 56-day rule, after 56 days, volume guard reject/allow, partial update |
+| TestViews | 9 | Inventory summary (stock/empty/excluded), critical pending (present/normal/fulfilled), expiring soon, dashboard stats |
+| TestAuditTrail | 6 | Donation/allocation audit, old/new values, insert/timestamp/performed_by |
+| TestDomainNormalization | 6 | Invalid blood group/urgency/status/component, all valid groups, master table counts |
+| TestComponentTracking | 6 | Split bags, volumes, shelf lives, whole blood, component allocation, mismatch |
+| TestSoftDeletes | 4 | Donor rejected/preserved, recipient preserved, default active |
+| TestShortageAlerts | 3 | Empty stock, sufficient stock, required fields |
+| TestCompatibilityScoring | 4 | Exact match, fallback, incompatible, matrix integrity |
+| TestDonorLoyalty | 11 | Rare/common/medium bonus, eligibility, group filtering, recent/wrong/inactive exclusion, ordering |
+| TestPartialFulfillment | 4 | Partial, incremental, zero stock, fulfillment log tracking |
+| TestEdgeCases | 9 | Tiny/large donations, idempotent allocation, nonexistent donor, multi-group, return messages |
+| TestStress | 5 | 50 donors, 30 requests, audit growth, concurrent reads, repeated allocation |
+| TestRoutes | 12 | All GET/POST endpoints, form submissions, flash messages, 404 |
 
-### 2. System Analysis and Requirements
+Run with: `uv run pytest tests/test_logic.py -v`
 
-#### 2.1 Functional Requirements
-The system was designed to meet four core functional pillars:
-1.  **Donation & Supply Management:** The system must register donors and record donations. Crucially, it must convert a "Donation Event" into an "Inventory Item" (Blood Bag) automatically, calculating the expiry date based on the collection date.
-2.  **Inventory Tracking:** The system must maintain a real-time view of all blood bags. It must track the `initial_volume` (for historical yield analysis) and `current_volume` (for availability). The status of a bag must automatically transition from `Available` to `Empty` when its volume is depleted.
-3.  **Request & Demand Management:** Hospitals must be able to place requests. These requests must carry a `urgency_level` tag (`Critical` or `Normal`) to allow the system to triage life-threatening situations over elective ones.
-4.  **Automated Allocation:** The system must provide a "Smart Allocate" function that automatically matches supply to demand, respecting blood group compatibility rules and prioritizing the oldest stock to minimize wastage (FIFO).
+---
 
-#### 2.2 Non-Functional Requirements
-*   **Data Integrity:** Given the medical nature of the data, the system must never allow an "Orphaned" bag (a bag with no donor) or a "Ghost" fulfillment (blood allocated to a non-existent request).
-*   **Atomicity:** All complex operations (like splitting a bag across two requests) must be atomic. If the system fails to update the request status, it must not deduct the blood volume, and vice versa.
-*   **Concurrency:** The database must handle multiple reads and writes without corrupting inventory counts.
+## Technology Stack
 
-### 3. System Design and Methodology
+| Layer | Technology | Rationale |
+|-------|-----------|-----------|
+| Language | Python 3.14+ | Readability, standard sqlite3 library |
+| Web Framework | Flask 3.1 | Lightweight micro-framework allowing raw SQL |
+| Database | SQLite 3 | Zero-config, single-file, full SQL support |
+| Templating | Jinja2 + Bootstrap 5 | Dynamic HTML with responsive CSS framework |
+| Package Manager | uv | Fast, modern Python package manager |
+| Linting | ruff | Fast Python linter/formatter |
+| Type Checking | ty | Strict type analysis |
+| Testing | pytest | Industry-standard Python test framework |
 
-#### 3.1 Architectural Pattern: Model-View-Controller (MVC)
-The project adopts the standard MVC architecture, implemented via the Flask framework.
-*   **Model (Data Layer):** The state of the system is held in a relational SQLite database. The schema definition (`db_init.py`) serves as the single source of truth for the data structure.
-*   **View (Presentation Layer):** The user interface is decoupled from the logic. Jinja2 templates (`.html` files) handle the rendering of data. This allows the backend to remain API-centric (returning lists of dictionaries) while the frontend handles formatting (tables, badges, alerts).
-*   **Controller (Logic Layer):** The application logic is split into two distinct controllers:
-    *   `app/logic.py`: Contains the "Pure Business Logic"—algorithms for compatibility, sorting, and database transactions. This file knows nothing about HTTP or HTML.
-    *   `main.py`: Contains the "Application Controller Logic"—handling HTTP routes, parsing form data, and deciding which template to render.
+---
 
-#### 3.2 Database Design Philosophy
-The database schema was designed to be in **Third Normal Form (3NF)** to eliminate redundancy.
-*   **Separation of Donor and Donation:** A common mistake in simple systems is to store donation info on the donor record. Here, `DONOR` and `DONATION_LOG` are separate. One donor can have multiple donations. This allows for longitudinal tracking of a donor's history.
-*   **Separation of Donation and Inventory:** `DONATION_LOG` records the *event* (history), while `BLOOD_BAG` records the *asset* (current stock). This separation allows the system to track the *depletion* of a bag without altering the historical record of how much was originally donated.
-*   **Normalization of Fulfillment:** The `FULFILLMENT_LOG` is a many-to-many join table between `TRANSFUSION_REQ` and `BLOOD_BAG`. This is critical because:
-    *   One large request (e.g., 800ml) might be filled by two bags (450ml + 350ml).
-    *   One bag (450ml) might fill two small pediatric requests (50ml + 50ml).
-    *   A simple foreign key on the Request table would not support this complex N:M relationship.
+## Conclusion
 
-### 4. Algorithmic Logic: The "Smart Allocation" Engine
+The Blood Bank Management System demonstrated in this project is a robust, comprehensive solution to a complex logistical problem. By implementing 10 advanced DBMS features — from database triggers and views to predictive analytics and cross-match compatibility scoring — the system goes far beyond simple CRUD operations to demonstrate real-world relational database engineering principles.
 
-The `smart_allocate_all` function in `app/logic.py` represents the computational core of the project. It operates in a strict sequence:
+The shift from "Unit Tracking" to "Volume Tracking" with component-level granularity, combined with a preference-ranked compatibility matrix and partial fulfillment support, maximises the utility of every donated millilitre of blood. The 10-trigger architecture ensures that business rules are enforced at the database level (not just in application code), while the comprehensive audit trail provides full forensic traceability.
 
-#### 4.1 Step 1: Priority Queue Construction
-The system first queries all `TRANSFUSION_REQ` where `status = 'Pending'`. It applies a composite sorting key:
-1.  **Primary Sort Key: Urgency Level.** The algorithm explicitly maps `Critical` to a higher priority value than `Normal`. This ensures that a critical request logged *today* takes precedence over a normal request logged *yesterday*.
-2.  **Secondary Sort Key: Quantity (Descending).** Among requests of equal urgency, the system prioritizes the largest volume needs. This heuristic assumes that larger volume requests represent more severe hemorrhaging or major surgeries.
+With 95 automated tests, strict linting/formatting, and type checking, the codebase maintains professional-grade quality standards. The seed data script and demo guide enable immediate, realistic demonstration of all features.
 
-#### 4.2 Step 2: Compatibility Resolution
-For every request, the system determines the valid source blood groups using a **Compatibility Matrix**.
-*   **Logic:** `get_compatible_blood_groups(target_group)`
-*   **Example:** If the request is for `B-`, the system allows `B-` and `O-`. If the request is `AB+`, the system allows ALL groups.
-*   **Implementation:** This is implemented as a Python dictionary lookup, which is O(1) in complexity, ensuring high speed even with many requests.
-
-#### 4.3 Step 3: Inventory Filtering and Sorting (FIFO)
-The system queries the `BLOOD_BAG` table for candidates.
-*   **Filter 1:** `status = 'Available'`.
-*   **Filter 2:** `current_volume_ml > 0`.
-*   **Filter 3:** `blood_group` must be in the compatible list derived in Step 2.
-*   **Sorting:** `ORDER BY expiry_date ASC`. This is the **FIFO (First-In-First-Out)** mechanism. By selecting the bag closest to expiration, the system strictly minimizes the loss of inventory due to time decay.
-
-#### 4.4 Step 4: The Volume Deduction Loop
-The allocation is performed iteratively:
-*   The system calculates `amount_needed = total_requested - amount_allocated_so_far`.
-*   It picks the first bag from the sorted list.
-*   It determines `amount_to_take = min(bag_current_volume, amount_needed)`.
-*   **Database Update 1:** It subtracts `amount_to_take` from the bag's `current_volume_ml`.
-*   **Database Update 2:** If the bag volume hits 0, it updates the bag status to `Empty`.
-*   **Database Update 3:** It inserts a record into `FULFILLMENT_LOG` recording that "Bag X gave Y ml to Request Z".
-*   **Loop Condition:** The loop continues to the next bag until the request is 100% filled.
-
-### 5. Implementation Details
-
-#### 5.1 Technology Stack Selection
-*   **Python:** Selected for its readability and standard library support for SQLite. It allows for rapid prototyping of complex logic like the allocation algorithm.
-*   **Flask:** A micro-framework chosen for its lightweight nature. Unlike Django, it does not enforce a specific ORM, allowing us to write raw, optimized SQL queries using the standard `sqlite3` driver, giving us full control over the database interactions.
-*   **Jinja2:** The templating engine allows for logic within the HTML (loops, conditions), enabling the dashboard to dynamically render lists of variable length.
-
-#### 5.2 Transactional Safety
-A key implementation detail is the use of `conn.commit()` and `conn.rollback()`. In `app/logic.py`, the allocation process is wrapped in a `try...except` block.
-*   **Scenario:** Imagine the system updates a bag's volume but fails to insert the fulfillment log due to a disk error.
-*   **Resolution:** The `except` block catches the error and executes `conn.rollback()`. This reverts the volume update, ensuring that the database never "loses" blood volume without a corresponding record of where it went.
-
-#### 5.3 Input Sanitization and Security
-The project strictly uses **Parameterized Queries** (e.g., `execute("SELECT * FROM DONOR WHERE id = ?", (id,))`).
-*   **Prevention:** This prevents SQL Injection attacks. Even if a malicious user inputs `1 OR 1=1` as a name, the database driver treats it as a literal string, not executable code.
-*   **Validation:** The system casts numerical inputs (like quantity) to `float` or `int` immediately upon receipt, preventing type mismatch errors deep in the logic layer.
-
-### 6. User Interface Design Details
-
-#### 6.1 The "Single Pane of Glass" Dashboard
-The dashboard (`home.html`) is designed to answer the three most important questions for a blood bank manager immediately:
-1.  **"Is anyone dying?"** -> The **Critical Alerts Ticker** answers this. It uses a red alert style to grab attention.
-2.  **"What do we have?"** -> The **Inventory Summary** answers this. It groups data by blood type, showing both count and total volume.
-3.  **"What happened recently?"** -> The **Activity Logs** answer this, showing the pulse of the organization.
-
-#### 6.2 Hospital Request Flow
-The hospital interface is designed to be low-friction.
-*   **Dropdowns:** Critical fields like Blood Group and Urgency are strict dropdowns to prevent spelling errors (`A+` vs `A Positive`).
-*   **Urgency Coding:** The urgency selection directly drives the backend logic. This UI element is the "control lever" for the entire prioritization engine.
-
-### 7. Conclusion
-The Blood Bank Management System demonstrated in this project is a robust, scalable solution to a complex logistical problem. By shifting the paradigm from "Unit Tracking" to "Volume Tracking" and implementing a rigorous "Priority-FIFO" allocation algorithm, the system maximizes the utility of every donated milliliter of blood. The strict adherence to database normalization and transactional integrity ensures that the system is reliable enough for the high-stakes environment of healthcare. This project serves as a comprehensive proof-of-concept for how modern software engineering principles can be applied to save lives.
+This project serves as a comprehensive proof-of-concept for how modern software engineering principles and advanced DBMS techniques can be applied to save lives.

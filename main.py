@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, url_for, flash
 from app.logic import (
     process_donation,
@@ -10,12 +9,13 @@ from app.logic import (
 )
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_key'
+app.secret_key = "super_secret_key"
 
 
 # ───────────────────────── DASHBOARD ─────────────────────────
 
-@app.route('/')
+
+@app.route("/")
 def index():
     conn = get_db_connection()
 
@@ -27,8 +27,7 @@ def index():
     """).fetchall()
 
     # Critical details (per-request)
-    critical_details = conn.execute(
-        "SELECT * FROM vw_critical_pending").fetchall()
+    critical_details = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
 
     # Inventory ticker (aggregate by blood group only)
     inventory_ticker = conn.execute("""
@@ -40,12 +39,10 @@ def index():
     """).fetchall()
 
     # Detailed inventory by group + component
-    inventory_detail = conn.execute(
-        "SELECT * FROM vw_inventory_summary").fetchall()
+    inventory_detail = conn.execute("SELECT * FROM vw_inventory_summary").fetchall()
 
     # Expiring soon (from view)
-    expiring_soon = conn.execute(
-        "SELECT * FROM vw_expiring_soon").fetchall()
+    expiring_soon = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
 
     # Predictive shortage alerts (Item 7)
     shortage_alerts = get_shortage_alerts()
@@ -53,7 +50,7 @@ def index():
     # Shortage donor suggestions (Item 9)
     shortage_donors = {}
     for sa in shortage_alerts:
-        bg = sa['blood_group']
+        bg = sa["blood_group"]
         shortage_donors[bg] = get_eligible_donors_for_group(bg, limit=5)
 
     # Donation history
@@ -90,108 +87,114 @@ def index():
     ).fetchall()
 
     conn.close()
-    return render_template('home.html',
-                           alerts=critical_agg,
-                           critical_details=critical_details,
-                           inventory=inventory_ticker,
-                           inventory_detail=inventory_detail,
-                           shortage_alerts=shortage_alerts,
-                           shortage_donors=shortage_donors,
-                           expiring_soon=expiring_soon,
-                           donations=donations,
-                           fulfilled=fulfilled_history,
-                           full_inventory=full_inventory,
-                           audit_log=audit_log)
+    return render_template(
+        "home.html",
+        alerts=critical_agg,
+        critical_details=critical_details,
+        inventory=inventory_ticker,
+        inventory_detail=inventory_detail,
+        shortage_alerts=shortage_alerts,
+        shortage_donors=shortage_donors,
+        expiring_soon=expiring_soon,
+        donations=donations,
+        fulfilled=fulfilled_history,
+        full_inventory=full_inventory,
+        audit_log=audit_log,
+    )
 
 
-@app.route('/allocate_all', methods=['POST'])
+@app.route("/allocate_all", methods=["POST"])
 def allocate_all():
     success, msg = smart_allocate_all()
-    flash(msg, 'success' if success else 'danger')
-    return redirect(url_for('index'))
+    flash(msg, "success" if success else "danger")
+    return redirect(url_for("index"))
 
 
 # ───────────────────────── DONOR ─────────────────────────────
 
-@app.route('/donor', methods=['GET', 'POST'])
+
+@app.route("/donor", methods=["GET", "POST"])
 def donor():
     conn = get_db_connection()
-    if request.method == 'POST':
-        if 'register' in request.form:
-            name = request.form['name']
-            blood_group = request.form['blood_group']
-            phone = request.form['phone']
+    if request.method == "POST":
+        if "register" in request.form:
+            name = request.form["name"]
+            blood_group = request.form["blood_group"]
+            phone = request.form["phone"]
             conn.execute(
-                "INSERT INTO DONOR (name, blood_group, phone) "
-                "VALUES (?, ?, ?)", (name, blood_group, phone))
+                "INSERT INTO DONOR (name, blood_group, phone) VALUES (?, ?, ?)",
+                (name, blood_group, phone),
+            )
             conn.commit()
-            flash('Donor Registered Successfully!', 'success')
+            flash("Donor Registered Successfully!", "success")
 
-        elif 'donate' in request.form:
-            donor_id = request.form['donor_id']
-            quantity = float(request.form['quantity'])
-            split = 'split_components' in request.form
+        elif "donate" in request.form:
+            donor_id = request.form["donor_id"]
+            quantity = float(request.form["quantity"])
+            split = "split_components" in request.form
             success, message = process_donation(donor_id, quantity, split)
-            flash(message, 'success' if success else 'danger')
+            flash(message, "success" if success else "danger")
 
-        elif 'deactivate' in request.form:
-            did = request.form['donor_id']
-            conn.execute(
-                "UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
+        elif "deactivate" in request.form:
+            did = request.form["donor_id"]
+            conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
             conn.commit()
-            flash('Donor deactivated (soft delete).', 'warning')
+            flash("Donor deactivated (soft delete).", "warning")
 
-    donors = conn.execute(
-        "SELECT * FROM DONOR WHERE is_active = 1").fetchall()
+    donors = conn.execute("SELECT * FROM DONOR WHERE is_active = 1").fetchall()
     donor_scores = get_donor_scores()
     conn.close()
-    return render_template('donor.html',
-                           donors=donors,
-                           donor_scores=donor_scores)
+    return render_template("donor.html", donors=donors, donor_scores=donor_scores)
 
 
 # ───────────────────────── HOSPITAL / REQUESTS ───────────────
 
-@app.route('/hospital', methods=['GET', 'POST'])
+
+@app.route("/hospital", methods=["GET", "POST"])
 def hospital():
     conn = get_db_connection()
-    if request.method == 'POST':
-        if 'add_hospital' in request.form:
-            name = request.form['name']
-            hospital_name = request.form['hospital_name']
-            contact = request.form['contact']
+    if request.method == "POST":
+        if "add_hospital" in request.form:
+            name = request.form["name"]
+            hospital_name = request.form["hospital_name"]
+            contact = request.form["contact"]
             conn.execute(
                 "INSERT INTO RECIPIENT (name, hospital_name, contact_info) "
-                "VALUES (?, ?, ?)", (name, hospital_name, contact))
+                "VALUES (?, ?, ?)",
+                (name, hospital_name, contact),
+            )
             conn.commit()
-            flash('Hospital Added Successfully!', 'success')
+            flash("Hospital Added Successfully!", "success")
 
-        elif 'request_blood' in request.form:
-            recipient_id = request.form['recipient_id']
-            blood_group = request.form['blood_group']
-            component = request.form.get('component', 'Whole Blood')
-            quantity = float(request.form['quantity'])
-            urgency = request.form['urgency']
-            conn.execute("""
+        elif "request_blood" in request.form:
+            recipient_id = request.form["recipient_id"]
+            blood_group = request.form["blood_group"]
+            component = request.form.get("component", "Whole Blood")
+            quantity = float(request.form["quantity"])
+            urgency = request.form["urgency"]
+            conn.execute(
+                """
                 INSERT INTO TRANSFUSION_REQ
                     (recipient_id, requested_group, requested_component,
                      quantity_ml, urgency_level, req_date)
                 VALUES (?, ?, ?, ?, ?, DATE('now'))
-            """, (recipient_id, blood_group, component, quantity, urgency))
+            """,
+                (recipient_id, blood_group, component, quantity, urgency),
+            )
             conn.commit()
-            flash('Blood request logged.', 'info')
+            flash("Blood request logged.", "info")
 
-        elif 'deactivate_hospital' in request.form:
-            rid = request.form['recipient_id']
+        elif "deactivate_hospital" in request.form:
+            rid = request.form["recipient_id"]
             conn.execute(
-                "UPDATE RECIPIENT SET is_active = 0 "
-                "WHERE recipient_id = ?", (rid,))
+                "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?", (rid,)
+            )
             conn.commit()
-            flash('Hospital deactivated (soft delete).', 'warning')
+            flash("Hospital deactivated (soft delete).", "warning")
 
     recipients = conn.execute(
-        "SELECT * FROM RECIPIENT WHERE is_active = 1 "
-        "ORDER BY hospital_name").fetchall()
+        "SELECT * FROM RECIPIENT WHERE is_active = 1 ORDER BY hospital_name"
+    ).fetchall()
 
     # All non-fulfilled requests (includes Partially Fulfilled – Item 10)
     requests_list = conn.execute("""
@@ -208,26 +211,27 @@ def hospital():
     """).fetchall()
 
     # Component types for the form
-    components = conn.execute(
-        "SELECT component_type FROM COMPONENT_MASTER").fetchall()
+    components = conn.execute("SELECT component_type FROM COMPONENT_MASTER").fetchall()
 
     conn.close()
-    return render_template('hospital.html',
-                           recipients=recipients,
-                           requests=requests_list,
-                           components=components)
+    return render_template(
+        "hospital.html",
+        recipients=recipients,
+        requests=requests_list,
+        components=components,
+    )
 
 
 # ───────────────────────── AUDIT TRAIL ───────────────────────
 
-@app.route('/audit')
+
+@app.route("/audit")
 def audit():
     conn = get_db_connection()
-    logs = conn.execute(
-        "SELECT * FROM AUDIT_LOG ORDER BY timestamp DESC").fetchall()
+    logs = conn.execute("SELECT * FROM AUDIT_LOG ORDER BY timestamp DESC").fetchall()
     conn.close()
-    return render_template('audit.html', logs=logs)
+    return render_template("audit.html", logs=logs)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)

@@ -1,4 +1,3 @@
-
 from datetime import date, timedelta
 from db import get_db_connection
 
@@ -7,20 +6,22 @@ def _date_str(d):
     """Convert a date to ISO-8601 string for SQLite (avoids deprecated adapter)."""
     return d.isoformat() if isinstance(d, date) else str(d)
 
+
 # ────────────────────────────────────────────────────────────────────
 # Standard component volumes (ml) derived from a single whole-blood
 # donation of ≈ 450 ml.
 # ────────────────────────────────────────────────────────────────────
 COMPONENT_SPLIT = {
-    'Red Blood Cells': 200,
-    'Platelets':        50,
-    'Plasma':          200,
+    "Red Blood Cells": 200,
+    "Platelets": 50,
+    "Plasma": 200,
 }
 
 
 # ────────────────────────────────────────────────────────────────────
 # 1. DONATION  (Trigger 1-b enforces 56-day rule at DB level)
 # ────────────────────────────────────────────────────────────────────
+
 
 def process_donation(donor_id, quantity_ml, split_components=False):
     """
@@ -39,57 +40,71 @@ def process_donation(donor_id, quantity_ml, split_components=False):
     try:
         donor = conn.execute(
             "SELECT blood_group, last_donation_date FROM DONOR "
-            "WHERE donor_id = ? AND is_active = 1", (donor_id,)
+            "WHERE donor_id = ? AND is_active = 1",
+            (donor_id,),
         ).fetchone()
         if not donor:
             raise ValueError("Donor not found or inactive")
 
-        blood_group = donor['blood_group']
+        blood_group = donor["blood_group"]
         today = date.today()
 
         # Application-level safety check (nice error message).
         # DB trigger trg_donation_safety_lock is the hard enforcement.
-        if donor['last_donation_date']:
-            days_since = (today - date.fromisoformat(
-                str(donor['last_donation_date']))).days
+        if donor["last_donation_date"]:
+            days_since = (
+                today - date.fromisoformat(str(donor["last_donation_date"]))
+            ).days
             if days_since < 56:
                 raise ValueError(
                     f"DONATION_SAFETY: Donor must wait {56 - days_since} "
-                    "more days before donating again")
+                    "more days before donating again"
+                )
 
         # Insert donation log (trigger fires here)
         today_str = _date_str(today)
         cursor = conn.execute(
             "INSERT INTO DONATION_LOG (donor_id, donation_date, quantity_ml) "
-            "VALUES (?, ?, ?)", (donor_id, today_str, quantity_ml))
+            "VALUES (?, ?, ?)",
+            (donor_id, today_str, quantity_ml),
+        )
         donation_id = cursor.lastrowid
 
         # Determine bags to create
         if split_components:
             components = list(COMPONENT_SPLIT.items())
         else:
-            components = [('Whole Blood', quantity_ml)]
+            components = [("Whole Blood", quantity_ml)]
 
         for comp_type, vol in components:
             shelf = conn.execute(
-                "SELECT shelf_life_days FROM COMPONENT_MASTER "
-                "WHERE component_type = ?", (comp_type,)
+                "SELECT shelf_life_days FROM COMPONENT_MASTER WHERE component_type = ?",
+                (comp_type,),
             ).fetchone()
             if not shelf:
                 raise ValueError(f"Unknown component: {comp_type}")
-            expiry = today + timedelta(days=shelf['shelf_life_days'])
+            expiry = today + timedelta(days=shelf["shelf_life_days"])
             conn.execute(
                 "INSERT INTO BLOOD_BAG "
                 "(donation_id, blood_group, component_type, collection_date, "
                 " expiry_date, initial_volume_ml, current_volume_ml, status) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'Available')",
-                (donation_id, blood_group, comp_type, today_str,
-                 _date_str(expiry), vol, vol))
+                (
+                    donation_id,
+                    blood_group,
+                    comp_type,
+                    today_str,
+                    _date_str(expiry),
+                    vol,
+                    vol,
+                ),
+            )
 
         # Update donor record
         conn.execute(
             "UPDATE DONOR SET last_donation_date = ? WHERE donor_id = ?",
-            (today_str, donor_id))
+            (today_str, donor_id),
+        )
 
         conn.commit()
         kind = "component" if split_components else "whole-blood"
@@ -105,6 +120,7 @@ def process_donation(donor_id, quantity_ml, split_components=False):
 # 2. SMART ALLOCATION  (Items 8  & 10 – compatibility scoring,
 #                        partial fulfillment)
 # ────────────────────────────────────────────────────────────────────
+
 
 def smart_allocate_all():
     """
@@ -133,13 +149,14 @@ def smart_allocate_all():
         """).fetchall()
 
         for req in requests:
-            req_id = req['req_id']
-            needed = req['quantity_ml'] - req['quantity_allocated_ml']
+            req_id = req["req_id"]
+            needed = req["quantity_ml"] - req["quantity_allocated_ml"]
             if needed <= 0:
                 continue
 
             # Bags sorted by compatibility preference then FIFO expiry
-            bags = conn.execute("""
+            bags = conn.execute(
+                """
                 SELECT bb.bag_id, bb.current_volume_ml, bb.expiry_date,
                        cm.preference_rank
                 FROM   BLOOD_BAG bb
@@ -150,14 +167,15 @@ def smart_allocate_all():
                   AND  bb.current_volume_ml > 0
                   AND  bb.component_type = ?
                 ORDER  BY cm.preference_rank ASC, bb.expiry_date ASC
-            """, (req['requested_group'],
-                  req['requested_component'])).fetchall()
+            """,
+                (req["requested_group"], req["requested_component"]),
+            ).fetchall()
 
             allocated = 0.0
             for bag in bags:
                 if allocated >= needed:
                     break
-                take = min(bag['current_volume_ml'], needed - allocated)
+                take = min(bag["current_volume_ml"], needed - allocated)
 
                 # Fulfillment log FIRST  (triggers: volume guard checks
                 #   pre-deduction volume, then req allocated update, audit)
@@ -165,15 +183,16 @@ def smart_allocate_all():
                     "INSERT INTO FULFILLMENT_LOG "
                     "(req_id, bag_id, quantity_allocated_ml) "
                     "VALUES (?, ?, ?)",
-                    (req_id, bag['bag_id'], take))
+                    (req_id, bag["bag_id"], take),
+                )
 
                 # THEN deduct from bag (trigger trg_auto_expire_bag handles
                 # setting status = 'Empty' when volume reaches 0)
-                new_vol = bag['current_volume_ml'] - take
+                new_vol = bag["current_volume_ml"] - take
                 conn.execute(
-                    "UPDATE BLOOD_BAG SET current_volume_ml = ? "
-                    "WHERE bag_id = ?",
-                    (new_vol, bag['bag_id']))
+                    "UPDATE BLOOD_BAG SET current_volume_ml = ? WHERE bag_id = ?",
+                    (new_vol, bag["bag_id"]),
+                )
 
                 allocated += take
 
@@ -181,8 +200,7 @@ def smart_allocate_all():
                 allocations_made += 1
 
         conn.commit()
-        return True, (f"Allocation complete – processed "
-                      f"{allocations_made} request(s).")
+        return True, (f"Allocation complete – processed {allocations_made} request(s).")
     except Exception as e:
         conn.rollback()
         return False, str(e)
@@ -193,6 +211,7 @@ def smart_allocate_all():
 # ────────────────────────────────────────────────────────────────────
 # 3. PREDICTIVE SHORTAGE ALERT ENGINE  (Item 7)
 # ────────────────────────────────────────────────────────────────────
+
 
 def get_shortage_alerts():
     """
@@ -210,7 +229,7 @@ def get_shortage_alerts():
         WHERE  status = 'Available'
         GROUP  BY blood_group
     """).fetchall()
-    stock = {r['blood_group']: r['total_ml'] for r in stock_rows}
+    stock = {r["blood_group"]: r["total_ml"] for r in stock_rows}
 
     # Average daily consumption per group (last 30 days)
     consumption_rows = conn.execute("""
@@ -227,20 +246,22 @@ def get_shortage_alerts():
 
     alerts = []
     for row in consumption_rows:
-        bg = row['blood_group']
-        daily = row['avg_daily']
+        bg = row["blood_group"]
+        daily = row["avg_daily"]
         current = stock.get(bg, 0)
         if daily > 0:
             proj_days = current / daily
         else:
-            proj_days = float('inf') if current > 0 else 0
+            proj_days = float("inf") if current > 0 else 0
         if proj_days < 3:
-            alerts.append({
-                'blood_group': bg,
-                'current_ml': current,
-                'daily_rate': round(daily, 1),
-                'projected_days': round(proj_days, 1),
-            })
+            alerts.append(
+                {
+                    "blood_group": bg,
+                    "current_ml": current,
+                    "daily_rate": round(daily, 1),
+                    "projected_days": round(proj_days, 1),
+                }
+            )
 
     conn.close()
     return alerts
@@ -249,6 +270,7 @@ def get_shortage_alerts():
 # ────────────────────────────────────────────────────────────────────
 # 4. DONOR LOYALTY & ELIGIBILITY MODULE  (Item 9)
 # ────────────────────────────────────────────────────────────────────
+
 
 def get_donor_scores():
     """
@@ -300,7 +322,8 @@ def get_eligible_donors_for_group(blood_group, limit=5):
     Used when a shortage alert fires to surface donors to contact.
     """
     conn = get_db_connection()
-    donors = conn.execute("""
+    donors = conn.execute(
+        """
         SELECT d.donor_id, d.name, d.blood_group, d.phone,
                d.last_donation_date,
                COUNT(dl.donation_id) AS total_donations,
@@ -316,7 +339,9 @@ def get_eligible_donors_for_group(blood_group, limit=5):
         HAVING days_since_last >= 56 OR d.last_donation_date IS NULL
         ORDER  BY total_donations DESC, days_since_last DESC
         LIMIT  ?
-    """, (blood_group, limit)).fetchall()
+    """,
+        (blood_group, limit),
+    ).fetchall()
     conn.close()
     return donors
 
@@ -325,12 +350,12 @@ def get_eligible_donors_for_group(blood_group, limit=5):
 # 5. DASHBOARD HELPERS  (use SQL Views)
 # ────────────────────────────────────────────────────────────────────
 
+
 def get_dashboard_stats():
     """Aggregate stats consumed by the dashboard route."""
     conn = get_db_connection()
-    alerts    = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
+    alerts = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
     inventory = conn.execute("SELECT * FROM vw_inventory_summary").fetchall()
-    expiring  = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
+    expiring = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
     conn.close()
     return alerts, inventory, expiring
-

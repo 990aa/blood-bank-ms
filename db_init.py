@@ -27,7 +27,7 @@ def init_db():
         blood_group TEXT PRIMARY KEY
     );
     """)
-    for bg in ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'):
+    for bg in ("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"):
         cursor.execute("INSERT INTO BLOOD_GROUP_MASTER VALUES (?)", (bg,))
 
     cursor.execute("""
@@ -35,7 +35,7 @@ def init_db():
         urgency_level TEXT PRIMARY KEY
     );
     """)
-    for ul in ('Normal', 'Critical'):
+    for ul in ("Normal", "Critical"):
         cursor.execute("INSERT INTO URGENCY_LEVEL_MASTER VALUES (?)", (ul,))
 
     cursor.execute("""
@@ -43,7 +43,7 @@ def init_db():
         status TEXT PRIMARY KEY
     );
     """)
-    for s in ('Available', 'Empty', 'Expired', 'Quarantined'):
+    for s in ("Available", "Empty", "Expired", "Quarantined"):
         cursor.execute("INSERT INTO BAG_STATUS_MASTER VALUES (?)", (s,))
 
     cursor.execute("""
@@ -51,7 +51,7 @@ def init_db():
         status TEXT PRIMARY KEY
     );
     """)
-    for s in ('Pending', 'Partially Fulfilled', 'Fulfilled', 'Cancelled'):
+    for s in ("Pending", "Partially Fulfilled", "Fulfilled", "Cancelled"):
         cursor.execute("INSERT INTO REQUEST_STATUS_MASTER VALUES (?)", (s,))
 
     cursor.execute("""
@@ -60,9 +60,13 @@ def init_db():
         shelf_life_days INTEGER NOT NULL
     );
     """)
-    for ct, sl in [('Whole Blood', 42), ('Red Blood Cells', 42),
-                    ('Platelets', 5), ('Plasma', 365),
-                    ('Cryoprecipitate', 365)]:
+    for ct, sl in [
+        ("Whole Blood", 42),
+        ("Red Blood Cells", 42),
+        ("Platelets", 5),
+        ("Plasma", 365),
+        ("Cryoprecipitate", 365),
+    ]:
         cursor.execute("INSERT INTO COMPONENT_MASTER VALUES (?, ?)", (ct, sl))
 
     # Cross-match Compatibility Matrix (Item 8)
@@ -78,18 +82,35 @@ def init_db():
     """)
     compat_data = [
         # (recipient, donor, preference_rank)  — lower rank = preferred first
-        ('A+',  'A+',  1), ('A+',  'A-',  2), ('A+',  'O+',  3), ('A+',  'O-',  4),
-        ('A-',  'A-',  1), ('A-',  'O-',  2),
-        ('B+',  'B+',  1), ('B+',  'B-',  2), ('B+',  'O+',  3), ('B+',  'O-',  4),
-        ('B-',  'B-',  1), ('B-',  'O-',  2),
-        ('AB+', 'AB+', 1), ('AB+', 'AB-', 2), ('AB+', 'A+',  3), ('AB+', 'A-',  4),
-        ('AB+', 'B+',  5), ('AB+', 'B-',  6), ('AB+', 'O+',  7), ('AB+', 'O-',  8),
-        ('AB-', 'AB-', 1), ('AB-', 'A-',  2), ('AB-', 'B-',  3), ('AB-', 'O-',  4),
-        ('O+',  'O+',  1), ('O+',  'O-',  2),
-        ('O-',  'O-',  1),
+        ("A+", "A+", 1),
+        ("A+", "A-", 2),
+        ("A+", "O+", 3),
+        ("A+", "O-", 4),
+        ("A-", "A-", 1),
+        ("A-", "O-", 2),
+        ("B+", "B+", 1),
+        ("B+", "B-", 2),
+        ("B+", "O+", 3),
+        ("B+", "O-", 4),
+        ("B-", "B-", 1),
+        ("B-", "O-", 2),
+        ("AB+", "AB+", 1),
+        ("AB+", "AB-", 2),
+        ("AB+", "A+", 3),
+        ("AB+", "A-", 4),
+        ("AB+", "B+", 5),
+        ("AB+", "B-", 6),
+        ("AB+", "O+", 7),
+        ("AB+", "O-", 8),
+        ("AB-", "AB-", 1),
+        ("AB-", "A-", 2),
+        ("AB-", "B-", 3),
+        ("AB-", "O-", 4),
+        ("O+", "O+", 1),
+        ("O+", "O-", 2),
+        ("O-", "O-", 1),
     ]
-    cursor.executemany(
-        "INSERT INTO COMPATIBILITY_MATRIX VALUES (?, ?, ?)", compat_data)
+    cursor.executemany("INSERT INTO COMPATIBILITY_MATRIX VALUES (?, ?, ?)", compat_data)
 
     # ──────────────────────────────────────────────────────────────
     #  CORE TABLES
@@ -384,8 +405,10 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print("Database initialized: triggers, views, audit trail, "
-          "domain normalization, component tracking.")
+    print(
+        "Database initialized: triggers, views, audit trail, "
+        "domain normalization, component tracking."
+    )
 
 
 if __name__ == "__main__":
