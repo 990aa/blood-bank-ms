@@ -1,111 +1,114 @@
+---
+title: Blood Bank Management System - Entity Relationship Diagram
+---
 erDiagram
     BLOOD_GROUP_MASTER {
-        string blood_group PK
+        TEXT blood_group PK "8 valid groups"
     }
 
     URGENCY_LEVEL_MASTER {
-        string urgency_level PK
+        TEXT urgency_level PK "Normal or Critical"
     }
 
     BAG_STATUS_MASTER {
-        string status PK
+        TEXT status PK "Available Empty Expired Quarantined"
     }
 
     REQUEST_STATUS_MASTER {
-        string status PK
+        TEXT status PK "Pending Partial Fulfilled Cancelled"
     }
 
     COMPONENT_MASTER {
-        string component_type PK
-        int shelf_life_days
+        TEXT component_type PK "WholeBlood RBC Platelets Plasma Cryo"
+        INTEGER shelf_life_days "5 to 365 days"
     }
 
     COMPATIBILITY_MATRIX {
-        string recipient_group PK_FK
-        string donor_group PK_FK
-        int preference_rank
+        TEXT recipient_group FK "References BLOOD_GROUP_MASTER"
+        TEXT donor_group FK "References BLOOD_GROUP_MASTER"
+        INTEGER preference_rank "Lower is preferred"
     }
 
     DONOR {
-        int donor_id PK
-        string name
-        string blood_group FK
-        string phone
-        string email
-        date last_donation_date
-        int is_active
+        INTEGER donor_id PK "AUTOINCREMENT"
+        TEXT name "NOT NULL"
+        TEXT blood_group FK "References BLOOD_GROUP_MASTER"
+        TEXT phone
+        TEXT email
+        DATE last_donation_date "Updated per donation"
+        INTEGER is_active "DEFAULT 1 soft-delete"
     }
 
     RECIPIENT {
-        int recipient_id PK
-        string name
-        string hospital_name
-        string contact_info
-        int is_active
+        INTEGER recipient_id PK "AUTOINCREMENT"
+        TEXT name "NOT NULL"
+        TEXT hospital_name "NOT NULL"
+        TEXT contact_info
+        INTEGER is_active "DEFAULT 1 soft-delete"
     }
 
     DONATION_LOG {
-        int donation_id PK
-        int donor_id FK
-        date donation_date
-        float quantity_ml
+        INTEGER donation_id PK "AUTOINCREMENT"
+        INTEGER donor_id FK "References DONOR"
+        DATE donation_date "NOT NULL"
+        REAL quantity_ml "NOT NULL"
     }
 
     BLOOD_BAG {
-        int bag_id PK
-        int donation_id FK
-        string blood_group FK
-        string component_type FK
-        date collection_date
-        date expiry_date
-        float initial_volume_ml
-        float current_volume_ml
-        string status FK
+        INTEGER bag_id PK "AUTOINCREMENT"
+        INTEGER donation_id FK "References DONATION_LOG"
+        TEXT blood_group FK "References BLOOD_GROUP_MASTER"
+        TEXT component_type FK "References COMPONENT_MASTER"
+        DATE collection_date "NOT NULL"
+        DATE expiry_date "collection plus shelf-life"
+        REAL initial_volume_ml "NOT NULL"
+        REAL current_volume_ml "decremented on allocation"
+        TEXT status FK "DEFAULT Available"
     }
 
     TRANSFUSION_REQ {
-        int req_id PK
-        int recipient_id FK
-        string requested_group FK
-        string requested_component FK
-        float quantity_ml
-        float quantity_allocated_ml
-        string urgency_level FK
-        date req_date
-        string status FK
+        INTEGER req_id PK "AUTOINCREMENT"
+        INTEGER recipient_id FK "References RECIPIENT"
+        TEXT requested_group FK "References BLOOD_GROUP_MASTER"
+        TEXT requested_component FK "References COMPONENT_MASTER"
+        REAL quantity_ml "NOT NULL"
+        REAL quantity_allocated_ml "DEFAULT 0 partial fill"
+        TEXT urgency_level FK "DEFAULT Normal"
+        DATE req_date "NOT NULL"
+        TEXT status FK "DEFAULT Pending"
     }
 
     FULFILLMENT_LOG {
-        int fulfillment_id PK
-        int req_id FK
-        int bag_id FK
-        float quantity_allocated_ml
-        date fulfillment_date
+        INTEGER fulfillment_id PK "AUTOINCREMENT"
+        INTEGER req_id FK "References TRANSFUSION_REQ"
+        INTEGER bag_id FK "References BLOOD_BAG"
+        REAL quantity_allocated_ml "NOT NULL"
+        DATE fulfillment_date "DEFAULT current date"
     }
 
     AUDIT_LOG {
-        int log_id PK
-        string action_type
-        string table_name
-        int record_id
-        string old_value
-        string new_value
-        datetime timestamp
-        string performed_by
+        INTEGER log_id PK "AUTOINCREMENT"
+        TEXT action_type "INSERT or UPDATE"
+        TEXT table_name "target table"
+        INTEGER record_id "PK of affected row"
+        TEXT old_value "previous state"
+        TEXT new_value "new state"
+        DATETIME timestamp "DEFAULT current time"
+        TEXT performed_by "DEFAULT SYSTEM"
     }
 
-    BLOOD_GROUP_MASTER ||--o{ DONOR : "validates"
-    BLOOD_GROUP_MASTER ||--o{ BLOOD_BAG : "validates"
-    BLOOD_GROUP_MASTER ||--o{ TRANSFUSION_REQ : "validates"
-    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "recipient"
-    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "donor"
-    URGENCY_LEVEL_MASTER ||--o{ TRANSFUSION_REQ : "validates"
-    BAG_STATUS_MASTER ||--o{ BLOOD_BAG : "validates"
-    REQUEST_STATUS_MASTER ||--o{ TRANSFUSION_REQ : "validates"
-    COMPONENT_MASTER ||--o{ BLOOD_BAG : "categorizes"
-    COMPONENT_MASTER ||--o{ TRANSFUSION_REQ : "specifies"
-    DONOR ||--o{ DONATION_LOG : "makes"
-    DONATION_LOG ||--o{ BLOOD_BAG : "produces"
-    RECIPIENT ||--o{ TRANSFUSION_REQ : "requests"
-    TRANSFUSION_REQ ||--o{ FULFILLMENT_LOG : "fulfilled_by"
-    BLOOD_BAG ||--o{ FULFILLMENT_LOG : "supplies"
+    BLOOD_GROUP_MASTER ||--o{ DONOR : "blood_group"
+    BLOOD_GROUP_MASTER ||--o{ BLOOD_BAG : "blood_group"
+    BLOOD_GROUP_MASTER ||--o{ TRANSFUSION_REQ : "requested_group"
+    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "recipient_group"
+    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "donor_group"
+    URGENCY_LEVEL_MASTER ||--o{ TRANSFUSION_REQ : "urgency_level"
+    BAG_STATUS_MASTER ||--o{ BLOOD_BAG : "status"
+    REQUEST_STATUS_MASTER ||--o{ TRANSFUSION_REQ : "status"
+    COMPONENT_MASTER ||--o{ BLOOD_BAG : "component_type"
+    COMPONENT_MASTER ||--o{ TRANSFUSION_REQ : "requested_component"
+    DONOR ||--o{ DONATION_LOG : "donor_id"
+    DONATION_LOG ||--o{ BLOOD_BAG : "donation_id"
+    RECIPIENT ||--o{ TRANSFUSION_REQ : "recipient_id"
+    TRANSFUSION_REQ ||--o{ FULFILLMENT_LOG : "req_id"
+    BLOOD_BAG ||--o{ FULFILLMENT_LOG : "bag_id"
