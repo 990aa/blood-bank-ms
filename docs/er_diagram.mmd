@@ -1,11 +1,39 @@
 erDiagram
+    BLOOD_GROUP_MASTER {
+        string blood_group PK
+    }
+
+    URGENCY_LEVEL_MASTER {
+        string urgency_level PK
+    }
+
+    BAG_STATUS_MASTER {
+        string status PK
+    }
+
+    REQUEST_STATUS_MASTER {
+        string status PK
+    }
+
+    COMPONENT_MASTER {
+        string component_type PK
+        int shelf_life_days
+    }
+
+    COMPATIBILITY_MATRIX {
+        string recipient_group PK_FK
+        string donor_group PK_FK
+        int preference_rank
+    }
+
     DONOR {
         int donor_id PK
         string name
-        string blood_group
+        string blood_group FK
         string phone
         string email
         date last_donation_date
+        int is_active
     }
 
     RECIPIENT {
@@ -13,6 +41,7 @@ erDiagram
         string name
         string hospital_name
         string contact_info
+        int is_active
     }
 
     DONATION_LOG {
@@ -25,22 +54,25 @@ erDiagram
     BLOOD_BAG {
         int bag_id PK
         int donation_id FK
-        string blood_group
+        string blood_group FK
+        string component_type FK
         date collection_date
         date expiry_date
         float initial_volume_ml
         float current_volume_ml
-        string status
+        string status FK
     }
 
     TRANSFUSION_REQ {
         int req_id PK
         int recipient_id FK
-        string requested_group
+        string requested_group FK
+        string requested_component FK
         float quantity_ml
-        string urgency_level
+        float quantity_allocated_ml
+        string urgency_level FK
         date req_date
-        string status
+        string status FK
     }
 
     FULFILLMENT_LOG {
@@ -51,8 +83,29 @@ erDiagram
         date fulfillment_date
     }
 
+    AUDIT_LOG {
+        int log_id PK
+        string action_type
+        string table_name
+        int record_id
+        string old_value
+        string new_value
+        datetime timestamp
+        string performed_by
+    }
+
+    BLOOD_GROUP_MASTER ||--o{ DONOR : "validates"
+    BLOOD_GROUP_MASTER ||--o{ BLOOD_BAG : "validates"
+    BLOOD_GROUP_MASTER ||--o{ TRANSFUSION_REQ : "validates"
+    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "recipient"
+    BLOOD_GROUP_MASTER ||--o{ COMPATIBILITY_MATRIX : "donor"
+    URGENCY_LEVEL_MASTER ||--o{ TRANSFUSION_REQ : "validates"
+    BAG_STATUS_MASTER ||--o{ BLOOD_BAG : "validates"
+    REQUEST_STATUS_MASTER ||--o{ TRANSFUSION_REQ : "validates"
+    COMPONENT_MASTER ||--o{ BLOOD_BAG : "categorizes"
+    COMPONENT_MASTER ||--o{ TRANSFUSION_REQ : "specifies"
     DONOR ||--o{ DONATION_LOG : "makes"
-    DONATION_LOG ||--|| BLOOD_BAG : "becomes"
+    DONATION_LOG ||--o{ BLOOD_BAG : "produces"
     RECIPIENT ||--o{ TRANSFUSION_REQ : "requests"
     TRANSFUSION_REQ ||--o{ FULFILLMENT_LOG : "fulfilled_by"
     BLOOD_BAG ||--o{ FULFILLMENT_LOG : "supplies"
