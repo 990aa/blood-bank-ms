@@ -6,7 +6,7 @@
     <div class="col-md-4">
         <!-- Add Hospital Form -->
         <div class="card p-4 shadow-sm mb-4">
-            <h5 class="fw-bold text-primary">🏥 Add New Hospital</h5>
+            <h5 class="fw-bold text-primary"><i class="bi bi-hospital me-1"></i> Add New Hospital</h5>
             <form method="POST">
                 <input type="hidden" name="add_hospital" value="true">
                 <div class="mb-2">
@@ -30,7 +30,7 @@
 
         <!-- Request Blood Form -->
         <div class="card p-4 shadow-sm border-warning">
-            <h5 class="fw-bold text-dark">🩸 Request Blood</h5>
+            <h5 class="fw-bold text-dark"><i class="bi bi-droplet-fill me-1"></i> Request Blood</h5>
             <form method="POST">
                 <input type="hidden" name="request_blood" value="true">
                 <div class="mb-3">
@@ -148,7 +148,7 @@
             </div>
             {% else %}
             <div class="text-center py-5 text-muted">
-                <p class="fs-4">✅ All requests fulfilled!</p>
+                <p class="fs-4"><i class="bi bi-check-circle-fill text-success me-1"></i> All requests fulfilled!</p>
                 <p>Great job keeping the supply chain moving.</p>
             </div>
             {% endif %}

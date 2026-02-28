@@ -289,8 +289,6 @@ The project includes **95 automated tests** organised into 13 test classes:
 | TestStress | 5 | 50 donors, 30 requests, audit growth, concurrent reads, repeated allocation |
 | TestRoutes | 12 | All GET/POST endpoints, form submissions, flash messages, 404 |
 
-Run with: `uv run pytest tests/test_logic.py -v`
-
 ---
 
 ## Technology Stack
@@ -301,7 +299,6 @@ Run with: `uv run pytest tests/test_logic.py -v`
 | Web Framework | Flask 3.1 | Lightweight micro-framework allowing raw SQL |
 | Database | SQLite 3 | Zero-config, single-file, full SQL support |
 | Templating | Jinja2 + Bootstrap 5 | Dynamic HTML with responsive CSS framework |
-| Package Manager | uv | Fast, modern Python package manager |
 | Linting | ruff | Fast Python linter/formatter |
 | Type Checking | ty | Strict type analysis |
 | Testing | pytest | Industry-standard Python test framework |

@@ -17,7 +17,7 @@
             </div>
             <form action="{{ url_for('allocate_all') }}" method="POST">
                 <button type="submit" class="btn btn-dark btn-lg fw-bold pulse-button">
-                    ⚠️ ALLOCATE RESOURCES NOW
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i> ALLOCATE RESOURCES NOW
                 </button>
             </form>
         </div>
@@ -44,7 +44,7 @@
 <div class="row mb-4">
     <div class="col-12">
         <div class="alert alert-warning shadow-sm">
-            <h5 class="fw-bold">📉 Predictive Shortage Forecast</h5>
+            <h5 class="fw-bold"><i class="bi bi-graph-down-arrow me-1"></i> Predictive Shortage Forecast</h5>
             <p class="mb-2 small text-muted">Based on average daily consumption over the past 30 days</p>
             <div class="row">
                 {% for sa in shortage_alerts %}
@@ -76,7 +76,7 @@
 <div class="row mb-4">
     <div class="col-12">
         <div class="alert alert-info shadow-sm">
-            <h5 class="fw-bold">⏰ Bags Expiring Within 5 Days</h5>
+            <h5 class="fw-bold"><i class="bi bi-clock-history me-1"></i> Bags Expiring Within 5 Days</h5>
             <div class="table-responsive">
                 <table class="table table-sm table-borderless mb-0">
                     <thead><tr><th>Bag</th><th>Group</th><th>Component</th><th>Volume</th><th>Expires</th><th>Days Left</th></tr></thead>
