@@ -1,4 +1,4 @@
-# 🩸 Blood Bank Management System (BBMS)
+# Blood Bank Management System 
 
 A full-featured, web-based Blood Bank Management System built with **Python / Flask / SQLite**.  
 Designed as a DBMS course project, it showcases advanced relational database techniques including triggers, views, audit trails, domain normalization, and an intelligent allocation engine.
@@ -33,34 +33,6 @@ Designed as a DBMS course project, it showcases advanced relational database tec
 | Package Manager | [uv](https://docs.astral.sh/uv/) |
 | Linting | ruff, ty |
 | Testing | pytest (95 tests) |
-
----
-
-## Project Structure
-
-```
-blood-bank-ms/
-├── main.py              # Flask routes (Dashboard, Donor, Hospital, Audit)
-├── db.py                # Database connection helper
-├── db_init.py           # Schema initialisation (all DDL + triggers + views)
-├── seed_demo.py         # Demo data injection script
-├── pyproject.toml       # Project metadata & dependencies
-├── app/
-│   ├── __init__.py
-│   └── logic.py         # Core business logic (donation, allocation, alerts)
-├── templates/
-│   ├── base.html        # Layout with Bootstrap navbar
-│   ├── home.html        # Dashboard (alerts, stock ticker, tabs)
-│   ├── donor.html       # Donor registration, donation, loyalty leaderboard
-│   ├── hospital.html    # Hospital management, blood requests, waitlist
-│   └── audit.html       # Full audit trail table
-├── tests/
-│   └── test_logic.py    # 95 tests (unit, integration, edge, stress, routes)
-└── docs/
-    ├── er_diagram.mmd   # Mermaid ER diagram
-    ├── PROJECT_REPORT.md # Detailed project report
-    └── DEMO_GUIDE.md    # Step-by-step demo walkthrough
-```
 
 ---
 
