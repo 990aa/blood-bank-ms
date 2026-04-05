@@ -7,10 +7,10 @@ def _date_str(d):
     return d.isoformat() if isinstance(d, date) else str(d)
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # Standard component volumes (ml) derived from a single whole-blood
 # donation of ≈ 450 ml.
-# ────────────────────────────────────────────────────────────────────
+
 COMPONENT_SPLIT = {
     "Red Blood Cells": 200,
     "Platelets": 50,
@@ -18,9 +18,9 @@ COMPONENT_SPLIT = {
 }
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # 1. DONATION  (Trigger 1-b enforces 56-day rule at DB level)
-# ────────────────────────────────────────────────────────────────────
+
 
 
 def process_donation(donor_id, quantity_ml, split_components=False):
@@ -116,10 +116,10 @@ def process_donation(donor_id, quantity_ml, split_components=False):
         conn.close()
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # 2. SMART ALLOCATION  (Items 8  & 10 – compatibility scoring,
 #                        partial fulfillment)
-# ────────────────────────────────────────────────────────────────────
+
 
 
 def smart_allocate_all():
@@ -208,9 +208,9 @@ def smart_allocate_all():
         conn.close()
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # 3. PREDICTIVE SHORTAGE ALERT ENGINE  (Item 7)
-# ────────────────────────────────────────────────────────────────────
+
 
 
 def get_shortage_alerts():
@@ -267,9 +267,9 @@ def get_shortage_alerts():
     return alerts
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # 4. DONOR LOYALTY & ELIGIBILITY MODULE  (Item 9)
-# ────────────────────────────────────────────────────────────────────
+
 
 
 def get_donor_scores():
@@ -346,9 +346,9 @@ def get_eligible_donors_for_group(blood_group, limit=5):
     return donors
 
 
-# ────────────────────────────────────────────────────────────────────
+
 # 5. DASHBOARD HELPERS  (use SQL Views)
-# ────────────────────────────────────────────────────────────────────
+
 
 
 def get_dashboard_stats():

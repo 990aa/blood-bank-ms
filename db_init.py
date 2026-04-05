@@ -18,9 +18,9 @@ def init_db():
     cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute("PRAGMA recursive_triggers = ON;")
 
-    # ──────────────────────────────────────────────────────────────
+    
     #  MASTER LOOKUP TABLES  – Domain Normalization (Item 4 & 5)
-    # ──────────────────────────────────────────────────────────────
+    
 
     cursor.execute("""
     CREATE TABLE BLOOD_GROUP_MASTER (
@@ -112,9 +112,9 @@ def init_db():
     ]
     cursor.executemany("INSERT INTO COMPATIBILITY_MATRIX VALUES (?, ?, ?)", compat_data)
 
-    # ──────────────────────────────────────────────────────────────
+    
     #  CORE TABLES
-    # ──────────────────────────────────────────────────────────────
+    
 
     # 1. DONOR  (Item 6 – soft delete via is_active)
     cursor.execute("""
@@ -218,9 +218,9 @@ def init_db():
     );
     """)
 
-    # ──────────────────────────────────────────────────────────────
+    
     #  TRIGGERS  (Items 1 & 3)
-    # ──────────────────────────────────────────────────────────────
+    
 
     # --- Trigger 1-a: Auto-Expire Bags  (volume ≤ 0 → status = 'Empty') ---
     cursor.execute("""
@@ -355,9 +355,9 @@ def init_db():
     END;
     """)
 
-    # ──────────────────────────────────────────────────────────────
+    
     #  VIEWS  (Item 2 – Materialized / Computed Summary Views)
-    # ──────────────────────────────────────────────────────────────
+    
 
     cursor.execute("""
     CREATE VIEW vw_inventory_summary AS
