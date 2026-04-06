@@ -41,10 +41,8 @@ from db_init import init_db
 TEST_DB = "bloodbank_test_advanced.db"
 
 
-# ═══════════════════════════════════════════════════════════════
-#  FIXTURES
-# ═══════════════════════════════════════════════════════════════
 
+#  FIXTURES
 
 @pytest.fixture()
 def setup_db():
@@ -77,9 +75,9 @@ def flask_client(setup_db):
         yield client
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  HELPERS
-# ═══════════════════════════════════════════════════════════════
+
 
 
 def _add_donor(conn, name="D1", blood_group="A+", phone="555-0001"):
@@ -132,9 +130,9 @@ def _make_donor_eligible(conn, donor_id):
     conn.commit()
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 1: GRANULAR ALLOCATION
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestGranularAllocation:
@@ -205,9 +203,9 @@ class TestGranularAllocation:
         assert req["quantity_allocated_ml"] == 0
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 2: PRIORITIZATION (CRITICAL > NORMAL, QTY DESC)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestPrioritization:
@@ -284,9 +282,9 @@ class TestPrioritization:
         assert small["status"] == "Partially Fulfilled"
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 3: TRIGGERS
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestTriggers:
@@ -410,9 +408,9 @@ class TestTriggers:
         assert req["status"] == "Partially Fulfilled"
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 4: SQL VIEWS
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestViews:
@@ -502,9 +500,9 @@ class TestViews:
         assert isinstance(expiring, list)
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 5: AUDIT TRAIL
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestAuditTrail:
@@ -579,9 +577,9 @@ class TestAuditTrail:
             assert log["performed_by"] == "SYSTEM"
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 6: DOMAIN NORMALIZATION (FK constraints)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestDomainNormalization:
@@ -654,9 +652,9 @@ class TestDomainNormalization:
         )
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 7: COMPONENT TRACKING (Item 5)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestComponentTracking:
@@ -733,9 +731,9 @@ class TestComponentTracking:
         assert req["quantity_allocated_ml"] == 0
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 8: SOFT DELETES (Item 6)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestSoftDeletes:
@@ -792,9 +790,9 @@ class TestSoftDeletes:
         assert donor["is_active"] == 1
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 9: PREDICTIVE SHORTAGE ALERTS (Item 7)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestShortageAlerts:
@@ -823,9 +821,9 @@ class TestShortageAlerts:
             assert "projected_days" in a
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 10: CROSS-MATCH COMPATIBILITY (Item 8)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestCompatibilityScoring:
@@ -897,9 +895,9 @@ class TestCompatibilityScoring:
         assert ab_plus == 8
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 11: DONOR LOYALTY MODULE (Item 9)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestDonorLoyalty:
@@ -1001,9 +999,9 @@ class TestDonorLoyalty:
         assert len(scores) == 0
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FEATURE 12: PARTIAL FULFILLMENT (Item 10)
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestPartialFulfillment:
@@ -1071,9 +1069,9 @@ class TestPartialFulfillment:
         assert total == 250
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  EDGE CASES
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestEdgeCases:
@@ -1169,9 +1167,9 @@ class TestEdgeCases:
         assert "allocation" in msg.lower()
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  STRESS TESTS
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestStress:
@@ -1273,9 +1271,9 @@ class TestStress:
         assert len(logs) == 1
 
 
-# ═══════════════════════════════════════════════════════════════
+
 #  FLASK ROUTE INTEGRATION TESTS
-# ═══════════════════════════════════════════════════════════════
+
 
 
 class TestRoutes:
