@@ -33,19 +33,20 @@ def seed():
     conn = db.get_db_connection()
 
     # ── Step 2: Register Donors ─────────────────────────────────
+    # ── Step 2: Register Donors ─────────────────────────────────
     donors = [
-        ("Ahmed Khan", "A+", "0300-1234567"),
-        ("Sara Ali", "A-", "0301-2345678"),
-        ("Hassan Raza", "B+", "0302-3456789"),
-        ("Fatima Noor", "B-", "0303-4567890"),
-        ("Usman Sheikh", "AB+", "0304-5678901"),
-        ("Ayesha Tariq", "AB-", "0305-6789012"),
-        ("Omar Farooq", "O+", "0306-7890123"),
-        ("Zainab Hussain", "O-", "0307-8901234"),
-        ("Bilal Ahmad", "A+", "0308-9012345"),
-        ("Hira Malik", "B+", "0309-0123456"),
-        ("Noman Javed", "O+", "0310-1234567"),
-        ("Mariam Syed", "O-", "0311-2345678"),
+        ("James Smith", "A+", "07700-900123"),
+        ("Charlotte Jones", "A-", "07700-900456"),
+        ("Oliver Brown", "B+", "07700-900789"),
+        ("Emily Taylor", "B-", "07700-900012"),
+        ("George Davies", "AB+", "07700-900345"),
+        ("Isla Wilson", "AB-", "07700-900678"),
+        ("Harry Evans", "O+", "07700-900901"),
+        ("Sophie Thomas", "O-", "07700-900234"),
+        ("Jack Roberts", "A+", "07700-900567"),
+        ("Alice Walker", "B+", "07700-900890"),
+        ("William Wright", "O+", "07700-900112"),
+        ("Olivia Thompson", "O-", "07700-900445"),
     ]
     print(f"Registering {len(donors)} donors...")
     for name, bg, phone in donors:
@@ -56,11 +57,12 @@ def seed():
     conn.commit()
 
     # ── Step 3: Register Hospitals ──────────────────────────────
+    # ── Step 3: Register Hospitals ──────────────────────────────
     hospitals = [
-        ("Dr. Imran", "Jinnah Hospital", "042-111-0001"),
-        ("Dr. Amna", "Services Hospital", "042-111-0002"),
-        ("Dr. Khalid", "Mayo Hospital", "042-111-0003"),
-        ("Dr. Sana", "Shaukat Khanum", "042-111-0004"),
+        ("Dr. Harrison", "St Thomas' Hospital", "020 7188 7188"),
+        ("Dr. Campbell", "Royal Infirmary", "0131 536 1000"),
+        ("Dr. Bennett", "Queen Elizabeth Hospital", "0121 371 2000"),
+        ("Dr. Fletcher", "Guy's Hospital", "020 7188 7188"),
     ]
     print(f"Registering {len(hospitals)} hospitals...")
     for name, hosp, contact in hospitals:
