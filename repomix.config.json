@@ -1,0 +1,10 @@
+{
+  "include": [
+    "app/",
+    "templates/",
+    "db_init.py",
+    "db.py",
+    "main.py",
+    "seed_demo.py"
+  ]
+}

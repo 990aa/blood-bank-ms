@@ -1,0 +1,2011 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: app/, templates/, db_init.py, db.py, main.py, seed_demo.py
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/__init__.py
+app/logic.py
+db_init.py
+db.py
+main.py
+seed_demo.py
+templates/audit.html
+templates/base.html
+templates/donor.html
+templates/home.html
+templates/hospital.html
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/__init__.py">
+
+</file>
+
+<file path="seed_demo.py">
+"""
+seed_demo.py – Inject realistic demo data for the Blood Bank Management System.
+
+Run with:
+    uv run python seed_demo.py
+
+This script:
+  1. Re-initialises the database (drops + rebuilds schema)
+  2. Registers 12 donors across all 8 blood groups
+  3. Registers 4 hospitals
+  4. Logs donations (whole-blood and component-split)
+  5. Creates transfusion requests (Normal + Critical, various components)
+  6. Runs the Smart Allocation algorithm
+  7. Creates an "expiring soon" bag for dashboard demo
+  8. Soft-deletes one donor to demo the feature
+
+After running, start the app with:
+    uv run python main.py
+"""
+
+from datetime import date, timedelta
+
+import db
+from app.logic import _date_str, process_donation, smart_allocate_all
+from db_init import init_db
+
+
+def seed():
+    # ── Step 1: Fresh database ──────────────────────────────────
+    print("Initialising database...")
+    init_db()
+
+    conn = db.get_db_connection()
+
+    # ── Step 2: Register Donors ─────────────────────────────────
+    donors = [
+        ("Ahmed Khan", "A+", "0300-1234567"),
+        ("Sara Ali", "A-", "0301-2345678"),
+        ("Hassan Raza", "B+", "0302-3456789"),
+        ("Fatima Noor", "B-", "0303-4567890"),
+        ("Usman Sheikh", "AB+", "0304-5678901"),
+        ("Ayesha Tariq", "AB-", "0305-6789012"),
+        ("Omar Farooq", "O+", "0306-7890123"),
+        ("Zainab Hussain", "O-", "0307-8901234"),
+        ("Bilal Ahmad", "A+", "0308-9012345"),
+        ("Hira Malik", "B+", "0309-0123456"),
+        ("Noman Javed", "O+", "0310-1234567"),
+        ("Mariam Syed", "O-", "0311-2345678"),
+    ]
+    print(f"Registering {len(donors)} donors...")
+    for name, bg, phone in donors:
+        conn.execute(
+            "INSERT INTO DONOR (name, blood_group, phone) VALUES (?, ?, ?)",
+            (name, bg, phone),
+        )
+    conn.commit()
+
+    # ── Step 3: Register Hospitals ──────────────────────────────
+    hospitals = [
+        ("Dr. Imran", "Jinnah Hospital", "042-111-0001"),
+        ("Dr. Amna", "Services Hospital", "042-111-0002"),
+        ("Dr. Khalid", "Mayo Hospital", "042-111-0003"),
+        ("Dr. Sana", "Shaukat Khanum", "042-111-0004"),
+    ]
+    print(f"Registering {len(hospitals)} hospitals...")
+    for name, hosp, contact in hospitals:
+        conn.execute(
+            "INSERT INTO RECIPIENT (name, hospital_name, contact_info) "
+            "VALUES (?, ?, ?)",
+            (name, hosp, contact),
+        )
+    conn.commit()
+
+    # ── Step 4: Log Donations ───────────────────────────────────
+    # Set some donors' last_donation_date far back so they can donate "today"
+    old = _date_str(date.today() - timedelta(days=120))
+    for did in range(1, len(donors) + 1):
+        conn.execute(
+            "UPDATE DONOR SET last_donation_date = NULL WHERE donor_id = ?",
+            (did,),
+        )
+    conn.commit()
+
+    # Whole-blood donations
+    whole_blood_donations = [
+        (1, 450),  # Ahmed – A+
+        (3, 450),  # Hassan – B+
+        (5, 400),  # Usman – AB+
+        (7, 450),  # Omar – O+
+        (8, 450),  # Zainab – O-
+        (11, 350),  # Noman – O+
+    ]
+    print("Logging whole-blood donations...")
+    for did, qty in whole_blood_donations:
+        ok, msg = process_donation(did, qty, split_components=False)
+        print(f"  Donor {did}: {msg}")
+
+    # Component-split donations (need donors who haven't donated yet)
+    split_donations = [
+        (2, 450),  # Sara – A-
+        (4, 450),  # Fatima – B-
+        (10, 450),  # Hira – B+
+    ]
+    print("Logging component-split donations...")
+    for did, qty in split_donations:
+        ok, msg = process_donation(did, qty, split_components=True)
+        print(f"  Donor {did}: {msg}")
+
+    # ── Step 5: Create Transfusion Requests ─────────────────────
+    requests = [
+        # (recipient_id, blood_group, component, qty, urgency)
+        (1, "A+", "Whole Blood", 300, "Critical"),
+        (2, "O-", "Whole Blood", 500, "Critical"),
+        (3, "B+", "Red Blood Cells", 150, "Normal"),
+        (3, "B+", "Platelets", 50, "Normal"),
+        (4, "AB+", "Whole Blood", 200, "Normal"),
+        (1, "A-", "Plasma", 100, "Normal"),
+        (2, "O+", "Whole Blood", 600, "Critical"),
+        (4, "B-", "Red Blood Cells", 100, "Normal"),
+    ]
+    print(f"Creating {len(requests)} transfusion requests...")
+    for rid, bg, comp, qty, urg in requests:
+        conn.execute(
+            """INSERT INTO TRANSFUSION_REQ
+               (recipient_id, requested_group, requested_component,
+                quantity_ml, urgency_level, req_date)
+               VALUES (?, ?, ?, ?, ?, DATE('now'))""",
+            (rid, bg, comp, qty, urg),
+        )
+    conn.commit()
+
+    # ── Step 6: Run Smart Allocation ────────────────────────────
+    print("Running Smart Allocation algorithm...")
+    ok, msg = smart_allocate_all()
+    print(f"  {msg}")
+
+    # ── Step 7: Create an "expiring soon" bag for demo ──────────
+    # Manually adjust one bag's expiry to 2 days from now
+    soon = _date_str(date.today() + timedelta(days=2))
+    bag = conn.execute(
+        "SELECT bag_id FROM BLOOD_BAG WHERE status='Available' LIMIT 1"
+    ).fetchone()
+    if bag:
+        conn.execute(
+            "UPDATE BLOOD_BAG SET expiry_date = ? WHERE bag_id = ?",
+            (soon, bag["bag_id"]),
+        )
+        conn.commit()
+        print(f"  Bag #{bag['bag_id']} set to expire in 2 days (demo)")
+
+    # ── Step 8: Soft-delete a donor for demo ────────────────────
+    conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = 6")
+    conn.commit()
+    print("  Donor #6 (Ayesha Tariq) soft-deleted for demo")
+
+    # ── Step 9: Second donation for loyalty demo (Bilal) ────────
+    # Make Bilal eligible and donate again
+    conn.execute(
+        "UPDATE DONOR SET last_donation_date = ? WHERE donor_id = 9",
+        (old,),
+    )
+    conn.commit()
+    ok, msg = process_donation(9, 400, split_components=False)
+    print(f"  Bilal second donation: {msg}")
+
+    conn.close()
+
+    # ── Summary ─────────────────────────────────────────────────
+    print("\n" + "=" * 55)
+    print("  SEED COMPLETE – Demo data loaded successfully!")
+    print("=" * 55)
+    print("\nStart the app:")
+    print("  uv run python main.py")
+    print("\nOpen http://127.0.0.1:5000 in your browser.")
+    print("\nDemo highlights:")
+    print("  - Dashboard: critical alerts, shortage forecast, expiring bags")
+    print("  - Donors:    loyalty leaderboard, soft-deleted donor hidden")
+    print("  - Hospital:  waitlist with partial fulfillment progress bars")
+    print("  - Audit:     full forensic trail of all operations")
+
+
+if __name__ == "__main__":
+    seed()
+</file>
+
+<file path="templates/audit.html">
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col">
+        <h2 class="fw-bold">System Audit Trail</h2>
+        <p class="text-muted">
+            Complete forensic log of all INSERT / UPDATE operations on sensitive tables.
+            Populated automatically via database triggers (HIPAA-style compliance).
+        </p>
+    </div>
+</div>
+
+<div class="card p-4 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-sm table-striped table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>Log ID</th>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Table</th>
+                    <th>Record ID</th>
+                    <th>Old Value</th>
+                    <th>New Value</th>
+                    <th>Performed By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.log_id }}</td>
+                    <td><small>{{ log.timestamp }}</small></td>
+                    <td>
+                        {% if log.action_type == 'INSERT' %}
+                        <span class="badge bg-success">INSERT</span>
+                        {% elif log.action_type == 'UPDATE' %}
+                        <span class="badge bg-primary">UPDATE</span>
+                        {% elif log.action_type == 'DELETE' %}
+                        <span class="badge bg-danger">DELETE</span>
+                        {% else %}
+                        <span class="badge bg-secondary">{{ log.action_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td><code>{{ log.table_name }}</code></td>
+                    <td>#{{ log.record_id }}</td>
+                    <td><small class="text-muted">{{ log.old_value or '—' }}</small></td>
+                    <td><small>{{ log.new_value or '—' }}</small></td>
+                    <td>{{ log.performed_by }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if not logs %}
+    <div class="text-center py-4 text-muted">
+        <p>No audit entries yet. Actions on BLOOD_BAG, TRANSFUSION_REQ, DONATION_LOG and FULFILLMENT_LOG are automatically recorded.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+</file>
+
+<file path="db.py">
+import sqlite3
+
+DB_NAME: str = "bloodbank.db"
+
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row  # Access columns by name
+    conn.execute("PRAGMA foreign_keys = ON;")  # Enforce FKs
+    conn.execute("PRAGMA recursive_triggers = ON;")  # Enable cascade for audit triggers
+    return conn
+</file>
+
+<file path="templates/base.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Blood Bank MS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .navbar { border-bottom: 3px solid #dc3545; }
+        .card { border: none; shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .btn-brand { background-color: #dc3545; color: white; }
+        .btn-brand:hover { background-color: #bb2d3b; color: white; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white py-3 shadow-sm">
+      <div class="container">
+        <a class="navbar-brand fw-bold text-danger" href="{{ url_for('index') }}"><i class="bi bi-droplet-fill"></i> BBMS</a>
+        <div class="collapse navbar-collapse">
+          <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('index') }}">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('donor') }}">Donors</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('hospital') }}">Hospital Requests</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('audit') }}">Audit Trail</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container mt-4">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      
+      {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
+</file>
+
+<file path="templates/donor.html">
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <!-- Registration Form -->
+    <div class="col-md-4">
+        <div class="card p-4 mb-4">
+            <h4>Register New Donor</h4>
+            <form method="POST">
+                <input type="hidden" name="register" value="true">
+                <div class="mb-3">
+                    <label>Full Name</label>
+                    <input type="text" name="name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Blood Group</label>
+                    <select name="blood_group" class="form-select" required>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label>Phone</label>
+                    <input type="text" name="phone" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-brand w-100">Register Donor</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Donation Log -->
+    <div class="col-md-8">
+        <div class="card p-4 mb-4">
+            <h4>Log Donation</h4>
+            <form method="POST" class="row g-3">
+                <input type="hidden" name="donate" value="true">
+                <div class="col-md-5">
+                    <label>Select Donor</label>
+                    <select name="donor_id" class="form-select" required>
+                        {% for donor in donors %}
+                        <option value="{{ donor.donor_id }}">{{ donor.name }} ({{ donor.blood_group }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label>Quantity (ml)</label>
+                    <input type="number" name="quantity" class="form-control" value="450" required>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="split_components" id="splitCheck">
+                        <label class="form-check-label small" for="splitCheck">Split into<br>components</label>
+                    </div>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Save</button>
+                </div>
+            </form>
+            <small class="text-muted mt-2 d-block">
+                Splitting creates separate RBC (200ml/42d), Platelets (50ml/5d), and Plasma (200ml/365d) bags.
+                The 56-day donation safety interval is enforced by a database trigger.
+            </small>
+        </div>
+
+        <!-- Donor Loyalty Leaderboard (Item 9) -->
+        <div class="card p-4">
+            <h5 class="mb-3"><i class="bi bi-trophy me-1"></i> Donor Loyalty &amp; Eligibility</h5>
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Group</th>
+                        <th>Donations</th>
+                        <th>Total Vol</th>
+                        <th>Score</th>
+                        <th>Eligible?</th>
+                        <th>Last Donation</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in donor_scores %}
+                    <tr>
+                        <td>{{ d.donor_id }}</td>
+                        <td>{{ d.name }}</td>
+                        <td>
+                            <span class="badge bg-{{ 'danger' if d.blood_group in ['O-','AB-'] else 'secondary' }}">
+                                {{ d.blood_group }}
+                            </span>
+                            {% if d.rare_bonus > 0 %}
+                            <small class="text-danger"><i class="bi bi-star-fill"></i> rare</small>
+                            {% endif %}
+                        </td>
+                        <td>{{ d.total_donations }}</td>
+                        <td>{{ d.total_volume_ml }} ml</td>
+                        <td>
+                            <span class="badge bg-primary">{{ d.total_donations * 10 + d.rare_bonus }}</span>
+                        </td>
+                        <td>
+                            {% if d.is_eligible %}
+                            <span class="badge bg-success"><i class="bi bi-check-lg"></i> Eligible</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">Wait 56d</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ d.last_donation_date or 'Never' }}</td>
+                        <td>
+                            <form method="POST" style="display:inline">
+                                <input type="hidden" name="deactivate" value="true">
+                                <input type="hidden" name="donor_id" value="{{ d.donor_id }}">
+                                <button type="submit" class="btn btn-outline-danger btn-sm"
+                                    onclick="return confirm('Soft-delete this donor?')">
+                                    Deactivate
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+</file>
+
+<file path="templates/home.html">
+{% extends 'base.html' %}
+
+{% block content %}
+<!-- 1. Critical Alerts Section -->
+{% if alerts %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-danger shadow-sm d-flex justify-content-between align-items-center">
+            <div>
+                <h4 class="alert-heading fw-bold"><i class="bi bi-exclamation-triangle-fill"></i> CRITICAL SHORTAGES
+                    DETECTED</h4>
+                <ul class="mb-0">
+                    {% for alert in alerts %}
+                    <li><strong>{{ alert.requested_group }}</strong> needed urgently: {{ alert.total_needed }} ml</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <form action="{{ url_for('allocate_all') }}" method="POST">
+                <button type="submit" class="btn btn-dark btn-lg fw-bold pulse-button">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i> ALLOCATE RESOURCES NOW
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-8">
+        <h1 class="display-5 fw-bold text-dark">Blood Bank Dashboard</h1>
+        <p class="lead text-muted">Real-time inventory, allocation & predictive analytics</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <form action="{{ url_for('allocate_all') }}" method="POST">
+            <button type="submit" class="btn btn-primary btn-lg shadow-sm">
+                Run Allocation Algorithm
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<!-- Predictive Shortage Alerts (Item 7) -->
+{% if shortage_alerts %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-warning shadow-sm">
+            <h5 class="fw-bold"><i class="bi bi-graph-down-arrow me-1"></i> Predictive Shortage Forecast</h5>
+            <p class="mb-2 small text-muted">Based on average daily consumption over the past 30 days</p>
+            <div class="row">
+                {% for sa in shortage_alerts %}
+                <div class="col-md-3 mb-2">
+                    <div class="card border-warning">
+                        <div class="card-body py-2 text-center">
+                            <h4 class="fw-bold text-danger">{{ sa.blood_group }}</h4>
+                            <p class="mb-0"><strong>{{ sa.projected_days }}</strong> days supply left</p>
+                            <small class="text-muted">{{ sa.current_ml }} ml @ {{ sa.daily_rate }} ml/day</small>
+                            {% if shortage_donors.get(sa.blood_group) %}
+                            <hr class="my-1">
+                            <small class="text-success fw-bold">Top donors to contact:</small><br>
+                            {% for donor in shortage_donors[sa.blood_group] %}
+                            <small>{{ donor.name }} ({{ donor.phone or 'N/A' }})</small><br>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Expiring Soon Warning -->
+{% if expiring_soon %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-info shadow-sm">
+            <h5 class="fw-bold"><i class="bi bi-clock-history me-1"></i> Bags Expiring Within 5 Days</h5>
+            <div class="table-responsive">
+                <table class="table table-sm table-borderless mb-0">
+                    <thead><tr><th>Bag</th><th>Group</th><th>Component</th><th>Volume</th><th>Expires</th><th>Days Left</th></tr></thead>
+                    <tbody>
+                    {% for bag in expiring_soon %}
+                    <tr>
+                        <td>#{{ bag.bag_id }}</td>
+                        <td><span class="badge bg-secondary">{{ bag.blood_group }}</span></td>
+                        <td>{{ bag.component_type }}</td>
+                        <td>{{ bag.current_volume_ml }} ml</td>
+                        <td>{{ bag.expiry_date }}</td>
+                        <td><span class="badge bg-{{ 'danger' if bag.days_until_expiry <= 2 else 'warning' }}">{{ bag.days_until_expiry }}d</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 2. Stock Ticker (Summary) -->
+<div class="row g-4 mb-5">
+    {% for item in inventory %}
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm border-{{ 'danger' if item.total_vol < 1000 else 'success' }}">
+            <div class="card-body text-center">
+                <h2 class="display-4 fw-bold">{{ item.blood_group }}</h2>
+                <p class="fs-5 mb-0">{{ item.total_vol }} <small class="text-muted">ml</small></p>
+                <p class="text-muted small">{{ item.bag_count }} Bags</p>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12 text-center">
+        <div class="alert alert-warning">No blood bags in stock!</div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 3. Detailed Views (Tabs) -->
+<ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory"
+            type="button">Detailed Inventory</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="component-tab" data-bs-toggle="tab" data-bs-target="#component-view"
+            type="button">By Component</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="kivixa-history-tab" data-bs-toggle="tab" data-bs-target="#history"
+            type="button">Donation History</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="fulfilled-tab" data-bs-toggle="tab" data-bs-target="#fulfilled"
+            type="button">Fulfilled Requests</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="audit-tab" data-bs-toggle="tab" data-bs-target="#audit"
+            type="button">Audit Trail</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="myTabContent">
+    <!-- Detailed Inventory -->
+    <div class="tab-pane fade show active" id="inventory">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Bag ID</th>
+                        <th>Group</th>
+                        <th>Component</th>
+                        <th>Current Vol / Initial Vol</th>
+                        <th>Deduction Trace</th>
+                        <th>Status</th>
+                        <th>Expiry Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bag in full_inventory %}
+                    <tr>
+                        <td>#{{ bag.bag_id }}</td>
+                        <td><span class="badge bg-secondary">{{ bag.blood_group }}</span></td>
+                        <td><small>{{ bag.component_type }}</small></td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="progress flex-grow-1 me-2" style="height: 10px; width: 100px;">
+                                    <div class="progress-bar bg-danger" role="progressbar"
+                                        style="width: {{ (bag.current_volume_ml / bag.initial_volume_ml) * 100 }}%">
+                                    </div>
+                                </div>
+                                <small>{{ bag.current_volume_ml }} / {{ bag.initial_volume_ml }} ml</small>
+                            </div>
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                Used: {{ bag.initial_volume_ml - bag.current_volume_ml }} ml
+                            </small>
+                        </td>
+                        <td>{{ bag.status }}</td>
+                        <td>{{ bag.expiry_date }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Component View (from vw_inventory_summary) -->
+    <div class="tab-pane fade" id="component-view">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>Blood Group</th><th>Component</th><th>Bags</th><th>Total Volume</th></tr>
+                </thead>
+                <tbody>
+                    {% for row in inventory_detail %}
+                    <tr>
+                        <td><span class="badge bg-secondary">{{ row.blood_group }}</span></td>
+                        <td>{{ row.component_type }}</td>
+                        <td>{{ row.bag_count }}</td>
+                        <td>{{ row.total_volume_ml }} ml</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Donation History -->
+    <div class="tab-pane fade" id="history">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Donor</th>
+                        <th>Quantity</th>
+                        <th>Log ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in donations %}
+                    <tr>
+                        <td>{{ d.donation_date }}</td>
+                        <td>{{ d.name }}</td>
+                        <td>{{ d.quantity_ml }} ml</td>
+                        <td>#{{ d.donation_id }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Fulfilled Requests -->
+    <div class="tab-pane fade" id="fulfilled">
+        <div class="card p-4 shadow-sm">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Recipient</th>
+                        <th>Request</th>
+                        <th>Allocated From Bag</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in fulfilled %}
+                    <tr>
+                        <td>{{ f.fulfillment_date }}</td>
+                        <td>{{ f.recipient_name }}</td>
+                        <td>
+                            {{ f.requested_group }} ({{ f.requested_component }})
+                            {% if f.urgency_level == 'Critical' %}<span class="badge bg-danger">Critical</span>{% endif %}
+                        </td>
+                        <td>#{{ f.bag_id }}</td>
+                        <td>{{ f.fl_allocated }} ml</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Audit Trail -->
+    <div class="tab-pane fade" id="audit">
+        <div class="card p-4 shadow-sm">
+            <p class="text-muted small">Recent system-level actions (full log on <a href="{{ url_for('audit') }}">Audit Trail</a> page)</p>
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr><th>Time</th><th>Action</th><th>Table</th><th>Record</th><th>Old</th><th>New</th><th>By</th></tr>
+                </thead>
+                <tbody>
+                    {% for log in audit_log %}
+                    <tr>
+                        <td><small>{{ log.timestamp }}</small></td>
+                        <td><span class="badge bg-{{ 'success' if log.action_type == 'INSERT' else 'primary' }}">{{ log.action_type }}</span></td>
+                        <td><small>{{ log.table_name }}</small></td>
+                        <td>#{{ log.record_id }}</td>
+                        <td><small class="text-muted">{{ log.old_value or '—' }}</small></td>
+                        <td><small>{{ log.new_value or '—' }}</small></td>
+                        <td><small>{{ log.performed_by }}</small></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pulse-button {
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.05);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+</style>
+{% endblock %}
+</file>
+
+<file path="templates/hospital.html">
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- Left Column: Forms -->
+    <div class="col-md-4">
+        <!-- Add Hospital Form -->
+        <div class="card p-4 shadow-sm mb-4">
+            <h5 class="fw-bold text-primary"><i class="bi bi-hospital me-1"></i> Add New Hospital</h5>
+            <form method="POST">
+                <input type="hidden" name="add_hospital" value="true">
+                <div class="mb-2">
+                    <label class="form-label small text-muted">Contact Person</label>
+                    <input type="text" name="name" class="form-control form-control-sm" required
+                        placeholder="Dr. Smith">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">Hospital Name</label>
+                    <input type="text" name="hospital_name" class="form-control form-control-sm" required
+                        placeholder="City Gen">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Contact Info</label>
+                    <input type="text" name="contact" class="form-control form-control-sm" required
+                        placeholder="555-0100">
+                </div>
+                <button type="submit" class="btn btn-outline-primary w-100 btn-sm">Add Hospital</button>
+            </form>
+        </div>
+
+        <!-- Request Blood Form -->
+        <div class="card p-4 shadow-sm border-warning">
+            <h5 class="fw-bold text-dark"><i class="bi bi-droplet-fill me-1"></i> Request Blood</h5>
+            <form method="POST">
+                <input type="hidden" name="request_blood" value="true">
+                <div class="mb-3">
+                    <label class="form-label">Recipient (Hospital)</label>
+                    <select name="recipient_id" class="form-select" required>
+                        {% for recipient in recipients %}
+                        <option value="{{ recipient.recipient_id }}">{{ recipient.hospital_name }} ({{ recipient.name
+                            }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label">Blood Group</label>
+                        <select name="blood_group" class="form-select" required>
+                            <option value="A+">A+</option>
+                            <option value="A-">A-</option>
+                            <option value="B+">B+</option>
+                            <option value="B-">B-</option>
+                            <option value="AB+">AB+</option>
+                            <option value="AB-">AB-</option>
+                            <option value="O+">O+</option>
+                            <option value="O-">O-</option>
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Urgency</label>
+                        <select name="urgency" class="form-select">
+                            <option value="Normal">Normal</option>
+                            <option value="Critical" class="text-danger fw-bold">Critical</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Component Needed</label>
+                    <select name="component" class="form-select">
+                        {% for c in components %}
+                        <option value="{{ c.component_type }}">{{ c.component_type }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Quantity Needed (ml)</label>
+                    <input type="number" name="quantity" class="form-control" value="450" min="50" step="10" required>
+                </div>
+                <button type="submit" class="btn btn-warning w-100 fw-bold">Submit Request</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Right Column: Active Requests List -->
+    <div class="col-md-8">
+        <div class="card p-4 shadow-sm h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="mb-0">Waitlist (Prioritized)</h4>
+                <span class="badge bg-light text-dark border">Sorted by: Criticality &gt; Quantity</span>
+            </div>
+
+            {% if requests %}
+            <div class="table-responsive">
+                <table class="table align-middle table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Priority</th>
+                            <th>Hospital</th>
+                            <th>Needs</th>
+                            <th>Fulfillment</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for req in requests %}
+                        <tr class="{{ 'table-danger' if req.urgency_level == 'Critical' else '' }}">
+                            <td>
+                                {% if req.urgency_level == 'Critical' %}
+                                <span class="badge bg-danger">CRITICAL</span>
+                                {% else %}
+                                <span class="badge bg-info text-dark">Normal</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ req.hospital_name }}</strong><br>
+                                <small class="text-muted">{{ req.recipient_name }}</small>
+                            </td>
+                            <td>
+                                <span class="fs-5 fw-bold">{{ req.quantity_ml }} ml</span><br>
+                                of {{ req.requested_group }}
+                                <small class="text-muted">({{ req.requested_component }})</small>
+                            </td>
+                            <td>
+                                {% set pct = ((req.quantity_allocated_ml / req.quantity_ml) * 100) | round(0) | int if req.quantity_ml > 0 else 0 %}
+                                <div class="progress" style="height: 18px; min-width: 100px;">
+                                    <div class="progress-bar bg-{{ 'success' if pct == 100 else 'warning' }}"
+                                         role="progressbar" style="width: {{ pct }}%">
+                                        {{ pct }}%
+                                    </div>
+                                </div>
+                                <small class="text-muted">
+                                    {{ req.quantity_allocated_ml }} / {{ req.quantity_ml }} ml
+                                </small>
+                            </td>
+                            <td>
+                                {% if req.status == 'Pending' %}
+                                <span class="badge bg-warning text-dark">Pending</span>
+                                {% elif req.status == 'Partially Fulfilled' %}
+                                <span class="badge bg-info">Partial</span>
+                                {% else %}
+                                <span class="badge bg-success">{{ req.status }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <p class="fs-4"><i class="bi bi-check-circle-fill text-success me-1"></i> All requests fulfilled!</p>
+                <p>Great job keeping the supply chain moving.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+</file>
+
+<file path="app/logic.py">
+from datetime import date, timedelta
+from db import get_db_connection
+
+
+def _date_str(d):
+    """Convert a date to ISO-8601 string for SQLite (avoids deprecated adapter)."""
+    return d.isoformat() if isinstance(d, date) else str(d)
+
+
+
+# Standard component volumes (ml) derived from a single whole-blood
+# donation of ≈ 450 ml.
+
+COMPONENT_SPLIT = {
+    "Red Blood Cells": 200,
+    "Platelets": 50,
+    "Plasma": 200,
+}
+
+
+
+# 1. DONATION  (Trigger 1-b enforces 56-day rule at DB level)
+
+
+
+def process_donation(donor_id, quantity_ml, split_components=False):
+    """
+    Log a donation and create inventory bag(s).
+
+    Parameters
+    ----------
+    donor_id : int
+    quantity_ml : float
+    split_components : bool
+        If True the donation is separated into RBC, Platelets and Plasma
+        bags with individual shelf lives (Item 5). Otherwise a single
+        'Whole Blood' bag is created.
+    """
+    conn = get_db_connection()
+    try:
+        donor = conn.execute(
+            "SELECT blood_group, last_donation_date FROM DONOR "
+            "WHERE donor_id = ? AND is_active = 1",
+            (donor_id,),
+        ).fetchone()
+        if not donor:
+            raise ValueError("Donor not found or inactive")
+
+        blood_group = donor["blood_group"]
+        today = date.today()
+
+        # Application-level safety check (nice error message).
+        # DB trigger trg_donation_safety_lock is the hard enforcement.
+        if donor["last_donation_date"]:
+            days_since = (
+                today - date.fromisoformat(str(donor["last_donation_date"]))
+            ).days
+            if days_since < 56:
+                raise ValueError(
+                    f"DONATION_SAFETY: Donor must wait {56 - days_since} "
+                    "more days before donating again"
+                )
+
+        # Insert donation log (trigger fires here)
+        today_str = _date_str(today)
+        cursor = conn.execute(
+            "INSERT INTO DONATION_LOG (donor_id, donation_date, quantity_ml) "
+            "VALUES (?, ?, ?)",
+            (donor_id, today_str, quantity_ml),
+        )
+        donation_id = cursor.lastrowid
+
+        # Determine bags to create
+        if split_components:
+            components = list(COMPONENT_SPLIT.items())
+        else:
+            components = [("Whole Blood", quantity_ml)]
+
+        for comp_type, vol in components:
+            shelf = conn.execute(
+                "SELECT shelf_life_days FROM COMPONENT_MASTER WHERE component_type = ?",
+                (comp_type,),
+            ).fetchone()
+            if not shelf:
+                raise ValueError(f"Unknown component: {comp_type}")
+            expiry = today + timedelta(days=shelf["shelf_life_days"])
+            conn.execute(
+                "INSERT INTO BLOOD_BAG "
+                "(donation_id, blood_group, component_type, collection_date, "
+                " expiry_date, initial_volume_ml, current_volume_ml, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'Available')",
+                (
+                    donation_id,
+                    blood_group,
+                    comp_type,
+                    today_str,
+                    _date_str(expiry),
+                    vol,
+                    vol,
+                ),
+            )
+
+        # Update donor record
+        conn.execute(
+            "UPDATE DONOR SET last_donation_date = ? WHERE donor_id = ?",
+            (today_str, donor_id),
+        )
+
+        conn.commit()
+        kind = "component" if split_components else "whole-blood"
+        return True, f"Donation processed – {kind} bag(s) created"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+
+# 2. SMART ALLOCATION  (Items 8  & 10 – compatibility scoring,
+#                        partial fulfillment)
+
+
+
+def smart_allocate_all():
+    """
+    Global allocation algorithm.
+
+    Priority order:
+      1. Critical urgency first
+      2. Higher quantity needed (descending)
+
+    Within each request the engine uses the COMPATIBILITY_MATRIX table
+    so that the closest-match blood group is consumed first and precious
+    O− universal-donor blood is conserved (Item 8).
+
+    Supports partial fulfillment: allocates whatever is available and
+    lets the DB trigger set 'Partially Fulfilled' or 'Fulfilled' (Item 10).
+    """
+    conn = get_db_connection()
+    allocations_made = 0
+    try:
+        requests = conn.execute("""
+            SELECT * FROM TRANSFUSION_REQ
+            WHERE status IN ('Pending', 'Partially Fulfilled')
+            ORDER BY
+                CASE WHEN urgency_level = 'Critical' THEN 1 ELSE 2 END,
+                quantity_ml DESC
+        """).fetchall()
+
+        for req in requests:
+            req_id = req["req_id"]
+            needed = req["quantity_ml"] - req["quantity_allocated_ml"]
+            if needed <= 0:
+                continue
+
+            # Bags sorted by compatibility preference then FIFO expiry
+            bags = conn.execute(
+                """
+                SELECT bb.bag_id, bb.current_volume_ml, bb.expiry_date,
+                       cm.preference_rank
+                FROM   BLOOD_BAG bb
+                JOIN   COMPATIBILITY_MATRIX cm
+                       ON cm.donor_group = bb.blood_group
+                WHERE  cm.recipient_group = ?
+                  AND  bb.status = 'Available'
+                  AND  bb.current_volume_ml > 0
+                  AND  bb.component_type = ?
+                ORDER  BY cm.preference_rank ASC, bb.expiry_date ASC
+            """,
+                (req["requested_group"], req["requested_component"]),
+            ).fetchall()
+
+            allocated = 0.0
+            for bag in bags:
+                if allocated >= needed:
+                    break
+                take = min(bag["current_volume_ml"], needed - allocated)
+
+                # Fulfillment log FIRST  (triggers: volume guard checks
+                #   pre-deduction volume, then req allocated update, audit)
+                conn.execute(
+                    "INSERT INTO FULFILLMENT_LOG "
+                    "(req_id, bag_id, quantity_allocated_ml) "
+                    "VALUES (?, ?, ?)",
+                    (req_id, bag["bag_id"], take),
+                )
+
+                # THEN deduct from bag (trigger trg_auto_expire_bag handles
+                # setting status = 'Empty' when volume reaches 0)
+                new_vol = bag["current_volume_ml"] - take
+                conn.execute(
+                    "UPDATE BLOOD_BAG SET current_volume_ml = ? WHERE bag_id = ?",
+                    (new_vol, bag["bag_id"]),
+                )
+
+                allocated += take
+
+            if allocated > 0:
+                allocations_made += 1
+
+        conn.commit()
+        return True, (f"Allocation complete – processed {allocations_made} request(s).")
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+
+# 3. PREDICTIVE SHORTAGE ALERT ENGINE  (Item 7)
+
+
+
+def get_shortage_alerts():
+    """
+    For each blood group calculate *projected stock days* =
+      current_volume / avg_daily_consumption (last 30 days).
+
+    Returns a list of dicts for groups with < 3 days supply remaining.
+    """
+    conn = get_db_connection()
+
+    # Current available stock per blood group
+    stock_rows = conn.execute("""
+        SELECT blood_group, SUM(current_volume_ml) AS total_ml
+        FROM   BLOOD_BAG
+        WHERE  status = 'Available'
+        GROUP  BY blood_group
+    """).fetchall()
+    stock = {r["blood_group"]: r["total_ml"] for r in stock_rows}
+
+    # Average daily consumption per group (last 30 days)
+    consumption_rows = conn.execute("""
+        SELECT bgm.blood_group,
+               COALESCE(SUM(fl.quantity_allocated_ml), 0) / 30.0 AS avg_daily
+        FROM   BLOOD_GROUP_MASTER bgm
+        LEFT JOIN BLOOD_BAG bb
+               ON bgm.blood_group = bb.blood_group
+        LEFT JOIN FULFILLMENT_LOG fl
+               ON fl.bag_id = bb.bag_id
+              AND fl.fulfillment_date >= DATE('now', '-30 days')
+        GROUP  BY bgm.blood_group
+    """).fetchall()
+
+    alerts = []
+    for row in consumption_rows:
+        bg = row["blood_group"]
+        daily = row["avg_daily"]
+        current = stock.get(bg, 0)
+        if daily > 0:
+            proj_days = current / daily
+        else:
+            proj_days = float("inf") if current > 0 else 0
+        if proj_days < 3:
+            alerts.append(
+                {
+                    "blood_group": bg,
+                    "current_ml": current,
+                    "daily_rate": round(daily, 1),
+                    "projected_days": round(proj_days, 1),
+                }
+            )
+
+    conn.close()
+    return alerts
+
+
+
+# 4. DONOR LOYALTY & ELIGIBILITY MODULE  (Item 9)
+
+
+
+def get_donor_scores():
+    """
+    Return all active donors with loyalty metrics.
+
+    Loyalty score = total_donations × 10 + rare_group_bonus
+    (O−/AB− → 10,  A−/B− → 5)
+    """
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT d.donor_id,
+               d.name,
+               d.blood_group,
+               d.phone,
+               d.last_donation_date,
+               COUNT(dl.donation_id)            AS total_donations,
+               COALESCE(SUM(dl.quantity_ml), 0) AS total_volume_ml,
+               CASE
+                   WHEN d.last_donation_date IS NULL THEN 1
+                   WHEN julianday('now')
+                      - julianday(d.last_donation_date) >= 56 THEN 1
+                   ELSE 0
+               END AS is_eligible,
+               CASE
+                   WHEN d.blood_group IN ('O-', 'AB-') THEN 10
+                   WHEN d.blood_group IN ('A-', 'B-')  THEN 5
+                   ELSE 0
+               END AS rare_bonus
+        FROM   DONOR d
+        LEFT   JOIN DONATION_LOG dl ON d.donor_id = dl.donor_id
+        WHERE  d.is_active = 1
+        GROUP  BY d.donor_id
+        ORDER  BY (COUNT(dl.donation_id) * 10
+                   + CASE
+                       WHEN d.blood_group IN ('O-','AB-') THEN 10
+                       WHEN d.blood_group IN ('A-','B-')  THEN 5
+                       ELSE 0
+                     END) DESC
+    """).fetchall()
+    conn.close()
+    return rows
+
+
+def get_eligible_donors_for_group(blood_group, limit=5):
+    """
+    Top *limit* eligible donors of a specific blood group, ordered by
+    loyalty (total donations DESC) then days-since-last DESC.
+
+    Used when a shortage alert fires to surface donors to contact.
+    """
+    conn = get_db_connection()
+    donors = conn.execute(
+        """
+        SELECT d.donor_id, d.name, d.blood_group, d.phone,
+               d.last_donation_date,
+               COUNT(dl.donation_id) AS total_donations,
+               CASE
+                   WHEN d.last_donation_date IS NULL THEN 999
+                   ELSE CAST(julianday('now')
+                           - julianday(d.last_donation_date) AS INTEGER)
+               END AS days_since_last
+        FROM   DONOR d
+        LEFT   JOIN DONATION_LOG dl ON d.donor_id = dl.donor_id
+        WHERE  d.blood_group = ? AND d.is_active = 1
+        GROUP  BY d.donor_id
+        HAVING days_since_last >= 56 OR d.last_donation_date IS NULL
+        ORDER  BY total_donations DESC, days_since_last DESC
+        LIMIT  ?
+    """,
+        (blood_group, limit),
+    ).fetchall()
+    conn.close()
+    return donors
+
+
+
+# 5. DASHBOARD HELPERS  (use SQL Views)
+
+
+
+def get_dashboard_stats():
+    """Aggregate stats consumed by the dashboard route."""
+    conn = get_db_connection()
+    alerts = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
+    inventory = conn.execute("SELECT * FROM vw_inventory_summary").fetchall()
+    expiring = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
+    conn.close()
+    return alerts, inventory, expiring
+</file>
+
+<file path="db_init.py">
+import sqlite3
+import os
+import db
+
+
+def init_db():
+    """
+    Initialize the database with the complete enhanced schema.
+    Uses db.DB_NAME so that tests can override the database path.
+    """
+    db_name = db.DB_NAME
+
+    if os.path.exists(db_name):
+        os.remove(db_name)
+
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON;")
+    cursor.execute("PRAGMA recursive_triggers = ON;")
+
+    
+    #  MASTER LOOKUP TABLES  – Domain Normalization (Item 4 & 5)
+    
+
+    cursor.execute("""
+    CREATE TABLE BLOOD_GROUP_MASTER (
+        blood_group TEXT PRIMARY KEY
+    );
+    """)
+    for bg in ("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"):
+        cursor.execute("INSERT INTO BLOOD_GROUP_MASTER VALUES (?)", (bg,))
+
+    cursor.execute("""
+    CREATE TABLE URGENCY_LEVEL_MASTER (
+        urgency_level TEXT PRIMARY KEY
+    );
+    """)
+    for ul in ("Normal", "Critical"):
+        cursor.execute("INSERT INTO URGENCY_LEVEL_MASTER VALUES (?)", (ul,))
+
+    cursor.execute("""
+    CREATE TABLE BAG_STATUS_MASTER (
+        status TEXT PRIMARY KEY
+    );
+    """)
+    for s in ("Available", "Empty", "Expired", "Quarantined"):
+        cursor.execute("INSERT INTO BAG_STATUS_MASTER VALUES (?)", (s,))
+
+    cursor.execute("""
+    CREATE TABLE REQUEST_STATUS_MASTER (
+        status TEXT PRIMARY KEY
+    );
+    """)
+    for s in ("Pending", "Partially Fulfilled", "Fulfilled", "Cancelled"):
+        cursor.execute("INSERT INTO REQUEST_STATUS_MASTER VALUES (?)", (s,))
+
+    cursor.execute("""
+    CREATE TABLE COMPONENT_MASTER (
+        component_type  TEXT PRIMARY KEY,
+        shelf_life_days INTEGER NOT NULL
+    );
+    """)
+    for ct, sl in [
+        ("Whole Blood", 42),
+        ("Red Blood Cells", 42),
+        ("Platelets", 5),
+        ("Plasma", 365),
+        ("Cryoprecipitate", 365),
+    ]:
+        cursor.execute("INSERT INTO COMPONENT_MASTER VALUES (?, ?)", (ct, sl))
+
+    # Cross-match Compatibility Matrix (Item 8)
+    cursor.execute("""
+    CREATE TABLE COMPATIBILITY_MATRIX (
+        recipient_group  TEXT NOT NULL,
+        donor_group      TEXT NOT NULL,
+        preference_rank  INTEGER NOT NULL,
+        PRIMARY KEY (recipient_group, donor_group),
+        FOREIGN KEY (recipient_group) REFERENCES BLOOD_GROUP_MASTER(blood_group),
+        FOREIGN KEY (donor_group)     REFERENCES BLOOD_GROUP_MASTER(blood_group)
+    );
+    """)
+    compat_data = [
+        # (recipient, donor, preference_rank)  — lower rank = preferred first
+        ("A+", "A+", 1),
+        ("A+", "A-", 2),
+        ("A+", "O+", 3),
+        ("A+", "O-", 4),
+        ("A-", "A-", 1),
+        ("A-", "O-", 2),
+        ("B+", "B+", 1),
+        ("B+", "B-", 2),
+        ("B+", "O+", 3),
+        ("B+", "O-", 4),
+        ("B-", "B-", 1),
+        ("B-", "O-", 2),
+        ("AB+", "AB+", 1),
+        ("AB+", "AB-", 2),
+        ("AB+", "A+", 3),
+        ("AB+", "A-", 4),
+        ("AB+", "B+", 5),
+        ("AB+", "B-", 6),
+        ("AB+", "O+", 7),
+        ("AB+", "O-", 8),
+        ("AB-", "AB-", 1),
+        ("AB-", "A-", 2),
+        ("AB-", "B-", 3),
+        ("AB-", "O-", 4),
+        ("O+", "O+", 1),
+        ("O+", "O-", 2),
+        ("O-", "O-", 1),
+    ]
+    cursor.executemany("INSERT INTO COMPATIBILITY_MATRIX VALUES (?, ?, ?)", compat_data)
+
+    
+    #  CORE TABLES
+    
+
+    # 1. DONOR  (Item 6 – soft delete via is_active)
+    cursor.execute("""
+    CREATE TABLE DONOR (
+        donor_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name               TEXT    NOT NULL,
+        blood_group        TEXT    NOT NULL,
+        phone              TEXT,
+        email              TEXT,
+        last_donation_date DATE,
+        is_active          INTEGER DEFAULT 1,
+        FOREIGN KEY (blood_group) REFERENCES BLOOD_GROUP_MASTER(blood_group)
+    );
+    """)
+
+    # 2. RECIPIENT  (Item 6 – soft delete)
+    cursor.execute("""
+    CREATE TABLE RECIPIENT (
+        recipient_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL,
+        hospital_name TEXT NOT NULL,
+        contact_info  TEXT,
+        is_active     INTEGER DEFAULT 1
+    );
+    """)
+
+    # 3. DONATION_LOG
+    cursor.execute("""
+    CREATE TABLE DONATION_LOG (
+        donation_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        donor_id      INTEGER NOT NULL,
+        donation_date DATE    NOT NULL,
+        quantity_ml   REAL    NOT NULL,
+        FOREIGN KEY (donor_id) REFERENCES DONOR(donor_id)
+    );
+    """)
+
+    # 4. BLOOD_BAG  (Item 5 – component tracking)
+    cursor.execute("""
+    CREATE TABLE BLOOD_BAG (
+        bag_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        donation_id       INTEGER NOT NULL,
+        blood_group       TEXT    NOT NULL,
+        component_type    TEXT    NOT NULL DEFAULT 'Whole Blood',
+        collection_date   DATE    NOT NULL,
+        expiry_date       DATE    NOT NULL,
+        initial_volume_ml REAL    NOT NULL,
+        current_volume_ml REAL    NOT NULL,
+        status            TEXT    DEFAULT 'Available',
+        FOREIGN KEY (donation_id)    REFERENCES DONATION_LOG(donation_id),
+        FOREIGN KEY (blood_group)    REFERENCES BLOOD_GROUP_MASTER(blood_group),
+        FOREIGN KEY (component_type) REFERENCES COMPONENT_MASTER(component_type),
+        FOREIGN KEY (status)         REFERENCES BAG_STATUS_MASTER(status)
+    );
+    """)
+
+    # 5. TRANSFUSION_REQ  (Item 10 – partial fulfillment tracking)
+    cursor.execute("""
+    CREATE TABLE TRANSFUSION_REQ (
+        req_id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient_id          INTEGER NOT NULL,
+        requested_group       TEXT    NOT NULL,
+        requested_component   TEXT    NOT NULL DEFAULT 'Whole Blood',
+        quantity_ml           REAL    NOT NULL,
+        quantity_allocated_ml REAL    DEFAULT 0,
+        urgency_level         TEXT    DEFAULT 'Normal',
+        req_date              DATE    NOT NULL,
+        status                TEXT    DEFAULT 'Pending',
+        FOREIGN KEY (recipient_id)        REFERENCES RECIPIENT(recipient_id),
+        FOREIGN KEY (requested_group)     REFERENCES BLOOD_GROUP_MASTER(blood_group),
+        FOREIGN KEY (requested_component) REFERENCES COMPONENT_MASTER(component_type),
+        FOREIGN KEY (urgency_level)       REFERENCES URGENCY_LEVEL_MASTER(urgency_level),
+        FOREIGN KEY (status)              REFERENCES REQUEST_STATUS_MASTER(status)
+    );
+    """)
+
+    # 6. FULFILLMENT_LOG
+    cursor.execute("""
+    CREATE TABLE FULFILLMENT_LOG (
+        fulfillment_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        req_id               INTEGER NOT NULL,
+        bag_id               INTEGER NOT NULL,
+        quantity_allocated_ml REAL    NOT NULL,
+        fulfillment_date     DATE    DEFAULT (DATE('now')),
+        FOREIGN KEY (req_id) REFERENCES TRANSFUSION_REQ(req_id),
+        FOREIGN KEY (bag_id) REFERENCES BLOOD_BAG(bag_id)
+    );
+    """)
+
+    # 7. AUDIT_LOG  (Item 3 – forensic traceability)
+    cursor.execute("""
+    CREATE TABLE AUDIT_LOG (
+        log_id       INTEGER  PRIMARY KEY AUTOINCREMENT,
+        action_type  TEXT     NOT NULL,
+        table_name   TEXT     NOT NULL,
+        record_id    INTEGER,
+        old_value    TEXT,
+        new_value    TEXT,
+        timestamp    DATETIME DEFAULT (DATETIME('now')),
+        performed_by TEXT     DEFAULT 'SYSTEM'
+    );
+    """)
+
+    
+    #  TRIGGERS  (Items 1 & 3)
+    
+
+    # --- Trigger 1-a: Auto-Expire Bags  (volume ≤ 0 → status = 'Empty') ---
+    cursor.execute("""
+    CREATE TRIGGER trg_auto_expire_bag
+    AFTER UPDATE OF current_volume_ml ON BLOOD_BAG
+    WHEN NEW.current_volume_ml <= 0 AND NEW.status != 'Empty'
+    BEGIN
+        UPDATE BLOOD_BAG SET status = 'Empty' WHERE bag_id = NEW.bag_id;
+    END;
+    """)
+
+    # --- Trigger 1-b: Donation Safety Lock (56-day rule) ---
+    cursor.execute("""
+    CREATE TRIGGER trg_donation_safety_lock
+    BEFORE INSERT ON DONATION_LOG
+    BEGIN
+        SELECT CASE
+            WHEN (SELECT last_donation_date FROM DONOR
+                  WHERE donor_id = NEW.donor_id) IS NOT NULL
+             AND julianday(NEW.donation_date)
+               - julianday((SELECT last_donation_date FROM DONOR
+                            WHERE donor_id = NEW.donor_id)) < 56
+            THEN RAISE(ABORT,
+                 'DONATION_SAFETY: Donor must wait at least 56 days between donations')
+        END;
+    END;
+    """)
+
+    # --- Trigger 1-c: Fulfillment Volume Guard ---
+    cursor.execute("""
+    CREATE TRIGGER trg_fulfillment_volume_guard
+    BEFORE INSERT ON FULFILLMENT_LOG
+    BEGIN
+        SELECT CASE
+            WHEN NEW.quantity_allocated_ml >
+                 (SELECT current_volume_ml FROM BLOOD_BAG
+                  WHERE bag_id = NEW.bag_id)
+            THEN RAISE(ABORT,
+                 'VOLUME_GUARD: Allocated quantity exceeds available bag volume')
+        END;
+    END;
+    """)
+
+    # --- Trigger: Auto-update partial/full fulfillment on TRANSFUSION_REQ ---
+    cursor.execute("""
+    CREATE TRIGGER trg_update_req_allocated
+    AFTER INSERT ON FULFILLMENT_LOG
+    BEGIN
+        UPDATE TRANSFUSION_REQ
+        SET quantity_allocated_ml = (
+                SELECT COALESCE(SUM(quantity_allocated_ml), 0)
+                FROM FULFILLMENT_LOG WHERE req_id = NEW.req_id),
+            status = CASE
+                WHEN (SELECT COALESCE(SUM(quantity_allocated_ml), 0)
+                      FROM FULFILLMENT_LOG WHERE req_id = NEW.req_id)
+                     >= quantity_ml
+                THEN 'Fulfilled'
+                WHEN (SELECT COALESCE(SUM(quantity_allocated_ml), 0)
+                      FROM FULFILLMENT_LOG WHERE req_id = NEW.req_id) > 0
+                THEN 'Partially Fulfilled'
+                ELSE status
+            END
+        WHERE req_id = NEW.req_id;
+    END;
+    """)
+
+    # ── Audit-trail triggers on sensitive tables ─────────────────
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_bag_insert
+    AFTER INSERT ON BLOOD_BAG
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, new_value)
+        VALUES('INSERT', 'BLOOD_BAG', NEW.bag_id,
+               'group='||NEW.blood_group||', component='||NEW.component_type
+               ||', vol='||NEW.initial_volume_ml);
+    END;
+    """)
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_bag_update
+    AFTER UPDATE ON BLOOD_BAG
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, old_value, new_value)
+        VALUES('UPDATE', 'BLOOD_BAG', OLD.bag_id,
+               'status='||OLD.status||', vol='||OLD.current_volume_ml,
+               'status='||NEW.status||', vol='||NEW.current_volume_ml);
+    END;
+    """)
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_req_insert
+    AFTER INSERT ON TRANSFUSION_REQ
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, new_value)
+        VALUES('INSERT', 'TRANSFUSION_REQ', NEW.req_id,
+               'group='||NEW.requested_group||', component='||NEW.requested_component
+               ||', qty='||NEW.quantity_ml||', urgency='||NEW.urgency_level);
+    END;
+    """)
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_req_update
+    AFTER UPDATE ON TRANSFUSION_REQ
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, old_value, new_value)
+        VALUES('UPDATE', 'TRANSFUSION_REQ', OLD.req_id,
+               'status='||OLD.status||', allocated='||OLD.quantity_allocated_ml,
+               'status='||NEW.status||', allocated='||NEW.quantity_allocated_ml);
+    END;
+    """)
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_donation_insert
+    AFTER INSERT ON DONATION_LOG
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, new_value)
+        VALUES('INSERT', 'DONATION_LOG', NEW.donation_id,
+               'donor='||NEW.donor_id||', qty='||NEW.quantity_ml
+               ||', date='||NEW.donation_date);
+    END;
+    """)
+
+    cursor.execute("""
+    CREATE TRIGGER trg_audit_fulfillment_insert
+    AFTER INSERT ON FULFILLMENT_LOG
+    BEGIN
+        INSERT INTO AUDIT_LOG(action_type, table_name, record_id, new_value)
+        VALUES('INSERT', 'FULFILLMENT_LOG', NEW.fulfillment_id,
+               'req='||NEW.req_id||', bag='||NEW.bag_id
+               ||', qty='||NEW.quantity_allocated_ml);
+    END;
+    """)
+
+    
+    #  VIEWS  (Item 2 – Materialized / Computed Summary Views)
+    
+
+    cursor.execute("""
+    CREATE VIEW vw_inventory_summary AS
+    SELECT blood_group,
+           component_type,
+           COUNT(*)               AS bag_count,
+           SUM(current_volume_ml) AS total_volume_ml
+    FROM   BLOOD_BAG
+    WHERE  status = 'Available'
+    GROUP  BY blood_group, component_type;
+    """)
+
+    cursor.execute("""
+    CREATE VIEW vw_critical_pending AS
+    SELECT tr.req_id,
+           tr.requested_group,
+           tr.requested_component,
+           tr.quantity_ml,
+           tr.quantity_allocated_ml,
+           (tr.quantity_ml - tr.quantity_allocated_ml) AS remaining_ml,
+           tr.urgency_level,
+           tr.status,
+           r.name          AS recipient_name,
+           r.hospital_name
+    FROM   TRANSFUSION_REQ tr
+    JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
+    WHERE  tr.urgency_level = 'Critical'
+      AND  tr.status IN ('Pending', 'Partially Fulfilled');
+    """)
+
+    cursor.execute("""
+    CREATE VIEW vw_expiring_soon AS
+    SELECT bag_id,
+           blood_group,
+           component_type,
+           current_volume_ml,
+           expiry_date,
+           CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+    FROM   BLOOD_BAG
+    WHERE  status = 'Available'
+      AND  julianday(expiry_date) - julianday('now') <= 5
+      AND  julianday(expiry_date) - julianday('now') >= 0
+    ORDER  BY expiry_date ASC;
+    """)
+
+    conn.commit()
+    conn.close()
+    print(
+        "Database initialized: triggers, views, audit trail, "
+        "domain normalization, component tracking."
+    )
+
+
+if __name__ == "__main__":
+    init_db()
+</file>
+
+<file path="main.py">
+from flask import Flask, render_template, request, redirect, url_for, flash
+from app.logic import (
+    process_donation,
+    smart_allocate_all,
+    get_shortage_alerts,
+    get_donor_scores,
+    get_eligible_donors_for_group,
+    get_db_connection,
+)
+
+app = Flask(__name__)
+app.secret_key = "super_secret_key"
+
+
+# ───────────────────────── DASHBOARD ─────────────────────────
+
+
+@app.route("/")
+def index():
+    conn = get_db_connection()
+
+    # Critical alerts – aggregated for banner (from view)
+    critical_agg = conn.execute("""
+        SELECT requested_group, SUM(remaining_ml) AS total_needed
+        FROM   vw_critical_pending
+        GROUP  BY requested_group
+    """).fetchall()
+
+    # Critical details (per-request)
+    critical_details = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
+
+    # Inventory ticker (aggregate by blood group only)
+    inventory_ticker = conn.execute("""
+        SELECT blood_group,
+               SUM(bag_count)       AS bag_count,
+               SUM(total_volume_ml) AS total_vol
+        FROM   vw_inventory_summary
+        GROUP  BY blood_group
+    """).fetchall()
+
+    # Detailed inventory by group + component
+    inventory_detail = conn.execute("SELECT * FROM vw_inventory_summary").fetchall()
+
+    # Expiring soon (from view)
+    expiring_soon = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
+
+    # Predictive shortage alerts (Item 7)
+    shortage_alerts = get_shortage_alerts()
+
+    # Shortage donor suggestions (Item 9)
+    shortage_donors = {}
+    for sa in shortage_alerts:
+        bg = sa["blood_group"]
+        shortage_donors[bg] = get_eligible_donors_for_group(bg, limit=5)
+
+    # Donation history
+    donations = conn.execute("""
+        SELECT d.name, dl.donation_date, dl.quantity_ml, dl.donation_id
+        FROM   DONATION_LOG dl
+        JOIN   DONOR d ON dl.donor_id = d.donor_id
+        ORDER  BY dl.donation_date DESC LIMIT 10
+    """).fetchall()
+
+    # Fulfilled / partially fulfilled
+    fulfilled_history = conn.execute("""
+        SELECT r.name AS recipient_name, tr.requested_group,
+               tr.requested_component, tr.quantity_ml,
+               tr.quantity_allocated_ml, tr.urgency_level,
+               fl.quantity_allocated_ml AS fl_allocated,
+               fl.fulfillment_date, fl.bag_id
+        FROM   FULFILLMENT_LOG fl
+        JOIN   TRANSFUSION_REQ tr ON fl.req_id = tr.req_id
+        JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
+        ORDER  BY fl.fulfillment_date DESC LIMIT 10
+    """).fetchall()
+
+    # Full inventory detail
+    full_inventory = conn.execute("""
+        SELECT * FROM BLOOD_BAG
+        WHERE  status = 'Available'
+        ORDER  BY expiry_date ASC
+    """).fetchall()
+
+    # Audit trail (latest 25)
+    audit_log = conn.execute(
+        "SELECT * FROM AUDIT_LOG ORDER BY timestamp DESC LIMIT 25"
+    ).fetchall()
+
+    conn.close()
+    return render_template(
+        "home.html",
+        alerts=critical_agg,
+        critical_details=critical_details,
+        inventory=inventory_ticker,
+        inventory_detail=inventory_detail,
+        shortage_alerts=shortage_alerts,
+        shortage_donors=shortage_donors,
+        expiring_soon=expiring_soon,
+        donations=donations,
+        fulfilled=fulfilled_history,
+        full_inventory=full_inventory,
+        audit_log=audit_log,
+    )
+
+
+@app.route("/allocate_all", methods=["POST"])
+def allocate_all():
+    success, msg = smart_allocate_all()
+    flash(msg, "success" if success else "danger")
+    return redirect(url_for("index"))
+
+
+# ───────────────────────── DONOR ─────────────────────────────
+
+
+@app.route("/donor", methods=["GET", "POST"])
+def donor():
+    conn = get_db_connection()
+    if request.method == "POST":
+        if "register" in request.form:
+            name = request.form["name"]
+            blood_group = request.form["blood_group"]
+            phone = request.form["phone"]
+            conn.execute(
+                "INSERT INTO DONOR (name, blood_group, phone) VALUES (?, ?, ?)",
+                (name, blood_group, phone),
+            )
+            conn.commit()
+            flash("Donor Registered Successfully!", "success")
+
+        elif "donate" in request.form:
+            donor_id = request.form["donor_id"]
+            quantity = float(request.form["quantity"])
+            split = "split_components" in request.form
+            success, message = process_donation(donor_id, quantity, split)
+            flash(message, "success" if success else "danger")
+
+        elif "deactivate" in request.form:
+            did = request.form["donor_id"]
+            conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
+            conn.commit()
+            flash("Donor deactivated (soft delete).", "warning")
+
+    donors = conn.execute("SELECT * FROM DONOR WHERE is_active = 1").fetchall()
+    donor_scores = get_donor_scores()
+    conn.close()
+    return render_template("donor.html", donors=donors, donor_scores=donor_scores)
+
+
+# ───────────────────────── HOSPITAL / REQUESTS ───────────────
+
+
+@app.route("/hospital", methods=["GET", "POST"])
+def hospital():
+    conn = get_db_connection()
+    if request.method == "POST":
+        if "add_hospital" in request.form:
+            name = request.form["name"]
+            hospital_name = request.form["hospital_name"]
+            contact = request.form["contact"]
+            conn.execute(
+                "INSERT INTO RECIPIENT (name, hospital_name, contact_info) "
+                "VALUES (?, ?, ?)",
+                (name, hospital_name, contact),
+            )
+            conn.commit()
+            flash("Hospital Added Successfully!", "success")
+
+        elif "request_blood" in request.form:
+            recipient_id = request.form["recipient_id"]
+            blood_group = request.form["blood_group"]
+            component = request.form.get("component", "Whole Blood")
+            quantity = float(request.form["quantity"])
+            urgency = request.form["urgency"]
+            conn.execute(
+                """
+                INSERT INTO TRANSFUSION_REQ
+                    (recipient_id, requested_group, requested_component,
+                     quantity_ml, urgency_level, req_date)
+                VALUES (?, ?, ?, ?, ?, DATE('now'))
+            """,
+                (recipient_id, blood_group, component, quantity, urgency),
+            )
+            conn.commit()
+            flash("Blood request logged.", "info")
+
+        elif "deactivate_hospital" in request.form:
+            rid = request.form["recipient_id"]
+            conn.execute(
+                "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?", (rid,)
+            )
+            conn.commit()
+            flash("Hospital deactivated (soft delete).", "warning")
+
+    recipients = conn.execute(
+        "SELECT * FROM RECIPIENT WHERE is_active = 1 ORDER BY hospital_name"
+    ).fetchall()
+
+    # All non-fulfilled requests (includes Partially Fulfilled – Item 10)
+    requests_list = conn.execute("""
+        SELECT r.req_id, r.requested_group, r.requested_component,
+               r.quantity_ml, r.quantity_allocated_ml,
+               r.urgency_level, r.status,
+               rec.name AS recipient_name, rec.hospital_name
+        FROM   TRANSFUSION_REQ r
+        JOIN   RECIPIENT rec ON r.recipient_id = rec.recipient_id
+        WHERE  r.status IN ('Pending', 'Partially Fulfilled')
+        ORDER  BY
+            CASE WHEN r.urgency_level = 'Critical' THEN 1 ELSE 2 END,
+            r.quantity_ml DESC
+    """).fetchall()
+
+    # Component types for the form
+    components = conn.execute("SELECT component_type FROM COMPONENT_MASTER").fetchall()
+
+    conn.close()
+    return render_template(
+        "hospital.html",
+        recipients=recipients,
+        requests=requests_list,
+        components=components,
+    )
+
+
+# ───────────────────────── AUDIT TRAIL ───────────────────────
+
+
+@app.route("/audit")
+def audit():
+    conn = get_db_connection()
+    logs = conn.execute("SELECT * FROM AUDIT_LOG ORDER BY timestamp DESC").fetchall()
+    conn.close()
+    return render_template("audit.html", logs=logs)
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+</file>
+
+</files>
