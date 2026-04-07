@@ -18,10 +18,10 @@ After running, start the app with:
     uv run python main.py
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import db
-from app.logic import _date_str, process_donation, smart_allocate_all
+from app.logic import _date_str, _utc_today, process_donation, smart_allocate_all
 from db_init import init_db
 
 
@@ -31,6 +31,8 @@ def seed():
     init_db()
 
     conn = db.get_db_connection()
+    today = _utc_today()
+    today_str = _date_str(today)
 
     # ── Step 2: Register Donors ─────────────────────────────────
     # ── Step 2: Register Donors ─────────────────────────────────
@@ -74,8 +76,7 @@ def seed():
     conn.commit()
 
     # ── Step 4: Log Donations ───────────────────────────────────
-    # Set some donors' last_donation_date far back so they can donate "today"
-    old = _date_str(date.today() - timedelta(days=120))
+    # Reset donors to allow controlled demo seeding.
     for did in range(1, len(donors) + 1):
         conn.execute(
             "UPDATE DONOR SET last_donation_date = NULL WHERE donor_id = ?",
@@ -83,27 +84,54 @@ def seed():
         )
     conn.commit()
 
-    # Whole-blood donations
-    whole_blood_donations = [
-        (1, 450),  # Ahmed – A+
-        (3, 450),  # Hassan – B+
-        (5, 400),  # Usman – AB+
-        (7, 450),  # Omar – O+
-        (8, 450),  # Zainab – O-
-        (11, 350),  # Noman – O+
+    # Add historical donations (other days) so timelines are not all the same.
+    historical_donations = [
+        # (donor_id, quantity_ml, days_ago)
+        (1, 300, 120),
+        (2, 280, 25),
+        (3, 350, 90),
+        (4, 260, 10),
+        (5, 400, 70),
+        (6, 300, 5),
+        (7, 320, 180),
+        (8, 310, 30),
+        (9, 280, 80),
+        (10, 260, 15),
+        (11, 300, 56),
+        (12, 290, 40),
     ]
-    print("Logging whole-blood donations...")
+    print("Logging historical donations for timeline variety...")
+    for did, qty, days_ago in historical_donations:
+        conn.execute(
+            "INSERT INTO DONATION_LOG (donor_id, donation_date, quantity_ml) VALUES (?, ?, ?)",
+            (did, _date_str(today - timedelta(days=days_ago)), qty),
+        )
+    conn.commit()
+
+    # Whole-blood donations today
+    whole_blood_donations = [
+        (1, 450),
+        (3, 420),
+        (5, 400),
+        (7, 450),
+        (8, 460),
+        (11, 350),
+        (12, 500),
+    ]
+    print("Logging whole-blood donations (today)...")
     for did, qty in whole_blood_donations:
         ok, msg = process_donation(did, qty, split_components=False)
         print(f"  Donor {did}: {msg}")
 
-    # Component-split donations (need donors who haven't donated yet)
+    # Component-split donations today (all remaining donors)
     split_donations = [
-        (2, 450),  # Sara – A-
-        (4, 450),  # Fatima – B-
-        (10, 450),  # Hira – B+
+        (2, 500),
+        (4, 350),
+        (6, 450),
+        (9, 475),
+        (10, 400),
     ]
-    print("Logging component-split donations...")
+    print("Logging component-split donations (today)...")
     for did, qty in split_donations:
         ok, msg = process_donation(did, qty, split_components=True)
         print(f"  Donor {did}: {msg}")
@@ -126,8 +154,8 @@ def seed():
             """INSERT INTO TRANSFUSION_REQ
                (recipient_id, requested_group, requested_component,
                 quantity_ml, urgency_level, req_date)
-               VALUES (?, ?, ?, ?, ?, DATE('now'))""",
-            (rid, bg, comp, qty, urg),
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (rid, bg, comp, qty, urg, today_str),
         )
     conn.commit()
 
@@ -138,7 +166,7 @@ def seed():
 
     # ── Step 7: Create an "expiring soon" bag for demo ──────────
     # Manually adjust one bag's expiry to 2 days from now
-    soon = _date_str(date.today() + timedelta(days=2))
+    soon = _date_str(today + timedelta(days=2))
     bag = conn.execute(
         "SELECT bag_id FROM BLOOD_BAG WHERE status='Available' LIMIT 1"
     ).fetchone()
@@ -153,17 +181,43 @@ def seed():
     # ── Step 8: Soft-delete a donor for demo ────────────────────
     conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = 6")
     conn.commit()
-    print("  Donor #6 (Ayesha Tariq) soft-deleted for demo")
+    print("  Donor #6 (Isla Wilson) soft-deleted for demo")
 
-    # ── Step 9: Second donation for loyalty demo (Bilal) ────────
-    # Make Bilal eligible and donate again
-    conn.execute(
-        "UPDATE DONOR SET last_donation_date = ? WHERE donor_id = 9",
-        (old,),
-    )
+    # ── Step 9: Mixed eligibility windows (at least 5 eligible) ─
+    # Keep some donors immediately eligible (>=56 days) and others recent.
+    last_donation_offsets = {
+        1: 120,
+        2: 20,
+        3: 90,
+        4: 10,
+        5: 70,
+        6: 5,
+        7: 180,
+        8: 30,
+        9: 80,
+        10: 15,
+        11: 56,
+        12: 40,
+    }
+    for did, days_ago in last_donation_offsets.items():
+        conn.execute(
+            "UPDATE DONOR SET last_donation_date = ? WHERE donor_id = ?",
+            (_date_str(today - timedelta(days=days_ago)), did),
+        )
     conn.commit()
-    ok, msg = process_donation(9, 400, split_components=False)
-    print(f"  Bilal second donation: {msg}")
+
+    eligible_count = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM DONOR
+        WHERE is_active = 1
+          AND (
+              last_donation_date IS NULL
+              OR julianday('now') - julianday(last_donation_date) >= 56
+          )
+    """
+    ).fetchone()["cnt"]
+    print(f"  Active eligible donors after seed: {eligible_count}")
 
     conn.close()
 

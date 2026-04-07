@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 from app.logic import (
+    _utc_today_str,
     process_donation,
     smart_allocate_all,
     get_shortage_alerts,
@@ -7,9 +8,33 @@ from app.logic import (
     get_eligible_donors_for_group,
     get_db_connection,
 )
+from app.settings import (
+    AUDIT_PAGE_SIZE,
+    EXPIRING_SOON_DAYS,
+    MIN_DONATION_QUANTITY_ML,
+    MIN_REQUEST_QUANTITY_ML,
+)
 
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
+
+VALID_BLOOD_GROUPS = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"}
+VALID_URGENCY_LEVELS = {"Normal", "Critical"}
+
+
+def _parse_positive_int(value):
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ───────────────────────── DASHBOARD ─────────────────────────
@@ -19,15 +44,36 @@ app.secret_key = "super_secret_key"
 def index():
     conn = get_db_connection()
 
-    # Critical alerts – aggregated for banner (from view)
+    # Critical alerts – aggregated for banner
     critical_agg = conn.execute("""
-        SELECT requested_group, SUM(remaining_ml) AS total_needed
-        FROM   vw_critical_pending
-        GROUP  BY requested_group
+        SELECT tr.requested_group,
+               SUM(tr.quantity_ml - tr.quantity_allocated_ml) AS total_needed
+        FROM   TRANSFUSION_REQ tr
+        JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
+        WHERE  tr.urgency_level = 'Critical'
+          AND  tr.status IN ('Pending', 'Partially Fulfilled')
+          AND  r.is_active = 1
+        GROUP  BY tr.requested_group
     """).fetchall()
 
     # Critical details (per-request)
-    critical_details = conn.execute("SELECT * FROM vw_critical_pending").fetchall()
+    critical_details = conn.execute("""
+        SELECT tr.req_id,
+               tr.requested_group,
+               tr.requested_component,
+               tr.quantity_ml,
+               tr.quantity_allocated_ml,
+               (tr.quantity_ml - tr.quantity_allocated_ml) AS remaining_ml,
+               tr.urgency_level,
+               tr.status,
+               r.name AS recipient_name,
+               r.hospital_name
+        FROM   TRANSFUSION_REQ tr
+        JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
+        WHERE  tr.urgency_level = 'Critical'
+          AND  tr.status IN ('Pending', 'Partially Fulfilled')
+          AND  r.is_active = 1
+    """).fetchall()
 
     # Inventory ticker (aggregate by blood group only)
     inventory_ticker = conn.execute("""
@@ -41,8 +87,23 @@ def index():
     # Detailed inventory by group + component
     inventory_detail = conn.execute("SELECT * FROM vw_inventory_summary").fetchall()
 
-    # Expiring soon (from view)
-    expiring_soon = conn.execute("SELECT * FROM vw_expiring_soon").fetchall()
+    # Expiring soon (configurable threshold)
+    expiring_soon = conn.execute(
+        """
+        SELECT bag_id,
+               blood_group,
+               component_type,
+               current_volume_ml,
+               expiry_date,
+               CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+        FROM   BLOOD_BAG
+        WHERE  status = 'Available'
+          AND  julianday(expiry_date) - julianday('now') <= ?
+          AND  julianday(expiry_date) - julianday('now') >= 0
+        ORDER  BY expiry_date ASC
+    """,
+        (EXPIRING_SOON_DAYS,),
+    ).fetchall()
 
     # Predictive shortage alerts (Item 7)
     shortage_alerts = get_shortage_alerts()
@@ -100,6 +161,7 @@ def index():
         fulfilled=fulfilled_history,
         full_inventory=full_inventory,
         audit_log=audit_log,
+        expiring_days_threshold=EXPIRING_SOON_DAYS,
     )
 
 
@@ -118,28 +180,50 @@ def donor():
     conn = get_db_connection()
     if request.method == "POST":
         if "register" in request.form:
-            name = request.form["name"]
-            blood_group = request.form["blood_group"]
-            phone = request.form["phone"]
-            conn.execute(
-                "INSERT INTO DONOR (name, blood_group, phone) VALUES (?, ?, ?)",
-                (name, blood_group, phone),
-            )
-            conn.commit()
-            flash("Donor Registered Successfully!", "success")
+            name = request.form.get("name", "").strip()
+            blood_group = request.form.get("blood_group", "").strip()
+            phone = request.form.get("phone", "").strip()
+
+            if not name:
+                flash("Donor name is required.", "danger")
+            elif blood_group not in VALID_BLOOD_GROUPS:
+                flash("Invalid blood group.", "danger")
+            elif not phone:
+                flash("Phone is required.", "danger")
+            else:
+                conn.execute(
+                    "INSERT INTO DONOR (name, blood_group, phone) VALUES (?, ?, ?)",
+                    (name, blood_group, phone),
+                )
+                conn.commit()
+                flash("Donor Registered Successfully!", "success")
 
         elif "donate" in request.form:
-            donor_id = request.form["donor_id"]
-            quantity = float(request.form["quantity"])
+            donor_id = _parse_positive_int(request.form.get("donor_id"))
+            quantity = _parse_float(request.form.get("quantity"))
             split = "split_components" in request.form
-            success, message = process_donation(donor_id, quantity, split)
-            flash(message, "success" if success else "danger")
+
+            if donor_id is None:
+                flash("Invalid donor selected.", "danger")
+            elif quantity is None:
+                flash("Donation quantity must be numeric.", "danger")
+            elif quantity < MIN_DONATION_QUANTITY_ML:
+                flash(
+                    f"Donation quantity must be at least {int(MIN_DONATION_QUANTITY_ML)} ml.",
+                    "danger",
+                )
+            else:
+                success, message = process_donation(donor_id, quantity, split)
+                flash(message, "success" if success else "danger")
 
         elif "deactivate" in request.form:
-            did = request.form["donor_id"]
-            conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
-            conn.commit()
-            flash("Donor deactivated (soft delete).", "warning")
+            did = _parse_positive_int(request.form.get("donor_id"))
+            if did is None:
+                flash("Invalid donor selected.", "danger")
+            else:
+                conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
+                conn.commit()
+                flash("Donor deactivated (soft delete).", "warning")
 
     donors = conn.execute("SELECT * FROM DONOR WHERE is_active = 1").fetchall()
     donor_scores = get_donor_scores()
@@ -155,42 +239,89 @@ def hospital():
     conn = get_db_connection()
     if request.method == "POST":
         if "add_hospital" in request.form:
-            name = request.form["name"]
-            hospital_name = request.form["hospital_name"]
-            contact = request.form["contact"]
-            conn.execute(
-                "INSERT INTO RECIPIENT (name, hospital_name, contact_info) "
-                "VALUES (?, ?, ?)",
-                (name, hospital_name, contact),
-            )
-            conn.commit()
-            flash("Hospital Added Successfully!", "success")
+            name = request.form.get("name", "").strip()
+            hospital_name = request.form.get("hospital_name", "").strip()
+            contact = request.form.get("contact", "").strip()
+
+            if not name:
+                flash("Contact person is required.", "danger")
+            elif not hospital_name:
+                flash("Hospital name is required.", "danger")
+            elif not contact:
+                flash("Contact info is required.", "danger")
+            else:
+                conn.execute(
+                    "INSERT INTO RECIPIENT (name, hospital_name, contact_info) "
+                    "VALUES (?, ?, ?)",
+                    (name, hospital_name, contact),
+                )
+                conn.commit()
+                flash("Hospital Added Successfully!", "success")
 
         elif "request_blood" in request.form:
-            recipient_id = request.form["recipient_id"]
-            blood_group = request.form["blood_group"]
+            recipient_id = _parse_positive_int(request.form.get("recipient_id"))
+            blood_group = request.form.get("blood_group", "").strip()
             component = request.form.get("component", "Whole Blood")
-            quantity = float(request.form["quantity"])
-            urgency = request.form["urgency"]
-            conn.execute(
-                """
-                INSERT INTO TRANSFUSION_REQ
-                    (recipient_id, requested_group, requested_component,
-                     quantity_ml, urgency_level, req_date)
-                VALUES (?, ?, ?, ?, ?, DATE('now'))
-            """,
-                (recipient_id, blood_group, component, quantity, urgency),
-            )
-            conn.commit()
-            flash("Blood request logged.", "info")
+            quantity = _parse_float(request.form.get("quantity"))
+            urgency = request.form.get("urgency", "").strip()
+
+            if recipient_id is None:
+                flash("Please select a valid hospital.", "danger")
+            elif blood_group not in VALID_BLOOD_GROUPS:
+                flash("Invalid blood group.", "danger")
+            elif urgency not in VALID_URGENCY_LEVELS:
+                flash("Invalid urgency level.", "danger")
+            elif quantity is None:
+                flash("Requested quantity must be numeric.", "danger")
+            elif quantity < MIN_REQUEST_QUANTITY_ML:
+                flash(
+                    f"Requested quantity must be at least {int(MIN_REQUEST_QUANTITY_ML)} ml.",
+                    "danger",
+                )
+            else:
+                recipient = conn.execute(
+                    "SELECT recipient_id FROM RECIPIENT WHERE recipient_id = ? AND is_active = 1",
+                    (recipient_id,),
+                ).fetchone()
+                component_row = conn.execute(
+                    "SELECT component_type FROM COMPONENT_MASTER WHERE component_type = ?",
+                    (component,),
+                ).fetchone()
+
+                if not recipient:
+                    flash("Selected hospital is inactive or not found.", "danger")
+                elif not component_row:
+                    flash("Invalid component selected.", "danger")
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO TRANSFUSION_REQ
+                            (recipient_id, requested_group, requested_component,
+                             quantity_ml, urgency_level, req_date)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            recipient_id,
+                            blood_group,
+                            component,
+                            quantity,
+                            urgency,
+                            _utc_today_str(),
+                        ),
+                    )
+                    conn.commit()
+                    flash("Blood request logged.", "info")
 
         elif "deactivate_hospital" in request.form:
-            rid = request.form["recipient_id"]
-            conn.execute(
-                "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?", (rid,)
-            )
-            conn.commit()
-            flash("Hospital deactivated (soft delete).", "warning")
+            rid = _parse_positive_int(request.form.get("recipient_id"))
+            if rid is None:
+                flash("Invalid hospital selected.", "danger")
+            else:
+                conn.execute(
+                    "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?", (rid,)
+                )
+                conn.commit()
+                flash("Hospital deactivated (soft delete).", "warning")
 
     recipients = conn.execute(
         "SELECT * FROM RECIPIENT WHERE is_active = 1 ORDER BY hospital_name"
@@ -205,6 +336,7 @@ def hospital():
         FROM   TRANSFUSION_REQ r
         JOIN   RECIPIENT rec ON r.recipient_id = rec.recipient_id
         WHERE  r.status IN ('Pending', 'Partially Fulfilled')
+          AND  rec.is_active = 1
         ORDER  BY
             CASE WHEN r.urgency_level = 'Critical' THEN 1 ELSE 2 END,
             r.quantity_ml DESC
@@ -228,9 +360,34 @@ def hospital():
 @app.route("/audit")
 def audit():
     conn = get_db_connection()
-    logs = conn.execute("SELECT * FROM AUDIT_LOG ORDER BY timestamp DESC").fetchall()
+    page = request.args.get("page", 1, type=int) or 1
+    page = max(page, 1)
+    offset = (page - 1) * AUDIT_PAGE_SIZE
+
+    total_logs = conn.execute("SELECT COUNT(*) AS cnt FROM AUDIT_LOG").fetchone()["cnt"]
+    total_pages = max(1, (total_logs + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE)
+
+    if page > total_pages:
+        page = total_pages
+        offset = (page - 1) * AUDIT_PAGE_SIZE
+
+    logs = conn.execute(
+        """
+        SELECT *
+        FROM   AUDIT_LOG
+        ORDER  BY timestamp DESC
+        LIMIT  ? OFFSET ?
+    """,
+        (AUDIT_PAGE_SIZE, offset),
+    ).fetchall()
     conn.close()
-    return render_template("audit.html", logs=logs)
+    return render_template(
+        "audit.html",
+        logs=logs,
+        page=page,
+        total_pages=total_pages,
+        total_logs=total_logs,
+    )
 
 
 if __name__ == "__main__":

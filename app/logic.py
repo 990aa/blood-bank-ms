@@ -1,4 +1,10 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+from app.settings import (
+    COMPONENT_SPLIT_RATIO,
+    DONATION_SAFETY_DAYS,
+    SHORTAGE_ALERT_DAYS_THRESHOLD,
+)
 from db import get_db_connection
 
 
@@ -7,15 +13,17 @@ def _date_str(d):
     return d.isoformat() if isinstance(d, date) else str(d)
 
 
+def _utc_today():
+    """Current date in UTC, used to avoid local-time vs UTC drift."""
+    return datetime.now(timezone.utc).date()
 
-# Standard component volumes (ml) derived from a single whole-blood
-# donation of ≈ 450 ml.
 
-COMPONENT_SPLIT = {
-    "Red Blood Cells": 200,
-    "Platelets": 50,
-    "Plasma": 200,
-}
+def _utc_today_str():
+    return _date_str(_utc_today())
+
+
+
+# Component split ratios are configured in app.settings
 
 
 
@@ -47,7 +55,11 @@ def process_donation(donor_id, quantity_ml, split_components=False):
             raise ValueError("Donor not found or inactive")
 
         blood_group = donor["blood_group"]
-        today = date.today()
+        today = _utc_today()
+
+        quantity_ml = float(quantity_ml)
+        if quantity_ml <= 0:
+            raise ValueError("Quantity must be greater than 0 ml")
 
         # Application-level safety check (nice error message).
         # DB trigger trg_donation_safety_lock is the hard enforcement.
@@ -55,9 +67,9 @@ def process_donation(donor_id, quantity_ml, split_components=False):
             days_since = (
                 today - date.fromisoformat(str(donor["last_donation_date"]))
             ).days
-            if days_since < 56:
+            if days_since < DONATION_SAFETY_DAYS:
                 raise ValueError(
-                    f"DONATION_SAFETY: Donor must wait {56 - days_since} "
+                    f"DONATION_SAFETY: Donor must wait {DONATION_SAFETY_DAYS - days_since} "
                     "more days before donating again"
                 )
 
@@ -72,7 +84,16 @@ def process_donation(donor_id, quantity_ml, split_components=False):
 
         # Determine bags to create
         if split_components:
-            components = list(COMPONENT_SPLIT.items())
+            qty = float(quantity_ml)
+            rbc = round(qty * COMPONENT_SPLIT_RATIO["Red Blood Cells"], 2)
+            platelets = round(qty * COMPONENT_SPLIT_RATIO["Platelets"], 2)
+            # Keep exact total by assigning residual volume to Plasma.
+            plasma = round(qty - rbc - platelets, 2)
+            components = [
+                ("Red Blood Cells", rbc),
+                ("Platelets", platelets),
+                ("Plasma", plasma),
+            ]
         else:
             components = [("Whole Blood", quantity_ml)]
 
@@ -141,11 +162,14 @@ def smart_allocate_all():
     allocations_made = 0
     try:
         requests = conn.execute("""
-            SELECT * FROM TRANSFUSION_REQ
-            WHERE status IN ('Pending', 'Partially Fulfilled')
+                        SELECT tr.*
+                        FROM   TRANSFUSION_REQ tr
+                        JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
+                        WHERE  tr.status IN ('Pending', 'Partially Fulfilled')
+                            AND  r.is_active = 1
             ORDER BY
-                CASE WHEN urgency_level = 'Critical' THEN 1 ELSE 2 END,
-                quantity_ml DESC
+                                CASE WHEN tr.urgency_level = 'Critical' THEN 1 ELSE 2 END,
+                                tr.quantity_ml DESC
         """).fetchall()
 
         for req in requests:
@@ -166,6 +190,7 @@ def smart_allocate_all():
                   AND  bb.status = 'Available'
                   AND  bb.current_volume_ml > 0
                   AND  bb.component_type = ?
+                                    AND  bb.expiry_date >= DATE('now')
                 ORDER  BY cm.preference_rank ASC, bb.expiry_date ASC
             """,
                 (req["requested_group"], req["requested_component"]),
@@ -218,7 +243,7 @@ def get_shortage_alerts():
     For each blood group calculate *projected stock days* =
       current_volume / avg_daily_consumption (last 30 days).
 
-    Returns a list of dicts for groups with < 3 days supply remaining.
+    Returns a list of dicts for groups under SHORTAGE_ALERT_DAYS_THRESHOLD.
     """
     conn = get_db_connection()
 
@@ -227,6 +252,7 @@ def get_shortage_alerts():
         SELECT blood_group, SUM(current_volume_ml) AS total_ml
         FROM   BLOOD_BAG
         WHERE  status = 'Available'
+          AND  expiry_date >= DATE('now')
         GROUP  BY blood_group
     """).fetchall()
     stock = {r["blood_group"]: r["total_ml"] for r in stock_rows}
@@ -253,7 +279,7 @@ def get_shortage_alerts():
             proj_days = current / daily
         else:
             proj_days = float("inf") if current > 0 else 0
-        if proj_days < 3:
+        if proj_days < SHORTAGE_ALERT_DAYS_THRESHOLD:
             alerts.append(
                 {
                     "blood_group": bg,
@@ -291,7 +317,7 @@ def get_donor_scores():
                CASE
                    WHEN d.last_donation_date IS NULL THEN 1
                    WHEN julianday('now')
-                      - julianday(d.last_donation_date) >= 56 THEN 1
+                      - julianday(d.last_donation_date) >= ? THEN 1
                    ELSE 0
                END AS is_eligible,
                CASE
@@ -309,7 +335,7 @@ def get_donor_scores():
                        WHEN d.blood_group IN ('A-','B-')  THEN 5
                        ELSE 0
                      END) DESC
-    """).fetchall()
+    """, (DONATION_SAFETY_DAYS,)).fetchall()
     conn.close()
     return rows
 
@@ -336,11 +362,11 @@ def get_eligible_donors_for_group(blood_group, limit=5):
         LEFT   JOIN DONATION_LOG dl ON d.donor_id = dl.donor_id
         WHERE  d.blood_group = ? AND d.is_active = 1
         GROUP  BY d.donor_id
-        HAVING days_since_last >= 56 OR d.last_donation_date IS NULL
+        HAVING days_since_last >= ? OR d.last_donation_date IS NULL
         ORDER  BY total_donations DESC, days_since_last DESC
         LIMIT  ?
     """,
-        (blood_group, limit),
+        (blood_group, DONATION_SAFETY_DAYS, limit),
     ).fetchall()
     conn.close()
     return donors

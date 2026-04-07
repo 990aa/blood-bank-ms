@@ -50,7 +50,7 @@
                 </div>
                 <div class="col-md-3">
                     <label>Quantity (ml)</label>
-                    <input type="number" name="quantity" class="form-control" value="450" required>
+                    <input type="number" name="quantity" class="form-control" value="450" min="50" step="10" required>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <div class="form-check">
@@ -63,7 +63,7 @@
                 </div>
             </form>
             <small class="text-muted mt-2 d-block">
-                Splitting creates separate RBC (200ml/42d), Platelets (50ml/5d), and Plasma (200ml/365d) bags.
+                Splitting creates RBC (44.4%), Platelets (11.1%), and Plasma (44.4%) bags based on the donated quantity.
                 The 56-day donation safety interval is enforced by a database trigger.
             </small>
         </div>

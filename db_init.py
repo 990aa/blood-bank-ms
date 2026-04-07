@@ -1,19 +1,20 @@
 import sqlite3
 import os
 import db
+from app.settings import EXPIRING_SOON_DAYS
 
 
-def init_db():
+def init_db(db_name=None):
     """
     Initialize the database with the complete enhanced schema.
     Uses db.DB_NAME so that tests can override the database path.
     """
-    db_name = db.DB_NAME
+    target_db_name = db_name or db.DB_NAME
 
-    if os.path.exists(db_name):
-        os.remove(db_name)
+    if os.path.exists(target_db_name):
+        os.remove(target_db_name)
 
-    conn = sqlite3.connect(db_name)
+    conn = sqlite3.connect(target_db_name)
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute("PRAGMA recursive_triggers = ON;")
@@ -385,10 +386,12 @@ def init_db():
     FROM   TRANSFUSION_REQ tr
     JOIN   RECIPIENT r ON tr.recipient_id = r.recipient_id
     WHERE  tr.urgency_level = 'Critical'
+            AND  r.is_active = 1
       AND  tr.status IN ('Pending', 'Partially Fulfilled');
     """)
 
-    cursor.execute("""
+    cursor.execute(
+        f"""
     CREATE VIEW vw_expiring_soon AS
     SELECT bag_id,
            blood_group,
@@ -398,10 +401,11 @@ def init_db():
            CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
     FROM   BLOOD_BAG
     WHERE  status = 'Available'
-      AND  julianday(expiry_date) - julianday('now') <= 5
+      AND  julianday(expiry_date) - julianday('now') <= {int(EXPIRING_SOON_DAYS)}
       AND  julianday(expiry_date) - julianday('now') >= 0
     ORDER  BY expiry_date ASC;
-    """)
+    """
+    )
 
     conn.commit()
     conn.close()

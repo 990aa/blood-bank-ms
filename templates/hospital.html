@@ -31,6 +31,7 @@
         <!-- Request Blood Form -->
         <div class="card p-4 shadow-sm border-warning">
             <h5 class="fw-bold text-dark"><i class="bi bi-droplet-fill me-1"></i> Request Blood</h5>
+            {% if recipients %}
             <form method="POST">
                 <input type="hidden" name="request_blood" value="true">
                 <div class="mb-3">
@@ -78,6 +79,11 @@
                 </div>
                 <button type="submit" class="btn btn-warning w-100 fw-bold">Submit Request</button>
             </form>
+            {% else %}
+            <div class="alert alert-warning mb-0">
+                Please register a hospital first before creating blood requests.
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -121,7 +127,15 @@
                                 <small class="text-muted">({{ req.requested_component }})</small>
                             </td>
                             <td>
-                                {% set pct = ((req.quantity_allocated_ml / req.quantity_ml) * 100) | round(0) | int if req.quantity_ml > 0 else 0 %}
+                                {% set pct = 0 %}
+                                {% if req.quantity_ml and req.quantity_ml > 0 %}
+                                    {% set pct = ((req.quantity_allocated_ml / req.quantity_ml) * 100) | round(0) | int %}
+                                {% endif %}
+                                {% if pct < 0 %}
+                                    {% set pct = 0 %}
+                                {% elif pct > 100 %}
+                                    {% set pct = 100 %}
+                                {% endif %}
                                 <div class="progress" style="height: 18px; min-width: 100px;">
                                     <div class="progress-bar bg-{{ 'success' if pct == 100 else 'warning' }}"
                                          role="progressbar" style="width: {{ pct }}%">
