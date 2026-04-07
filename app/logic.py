@@ -200,7 +200,9 @@ def smart_allocate_all() -> tuple[bool, str]:
 
         for request_row in requests:
             req_id = request_row["req_id"]
-            remaining_ml = request_row["quantity_ml"] - request_row["quantity_allocated_ml"]
+            remaining_ml = (
+                request_row["quantity_ml"] - request_row["quantity_allocated_ml"]
+            )
             if remaining_ml <= 0:
                 continue
 
@@ -418,7 +420,9 @@ def get_eligible_donors_for_group(
     return donors
 
 
-def get_dashboard_stats() -> tuple[list[sqlite3.Row], list[sqlite3.Row], list[sqlite3.Row]]:
+def get_dashboard_stats() -> tuple[
+    list[sqlite3.Row], list[sqlite3.Row], list[sqlite3.Row]
+]:
     """Fetch view-backed dashboard sections in one helper.
 
     Returns:

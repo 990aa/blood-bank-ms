@@ -1,13 +1,21 @@
-import sqlite3
+"""Database schema initializer for the Blood Bank Management System."""
+
 import os
+import sqlite3
+
 import db
 from app.settings import EXPIRING_SOON_DAYS
 
 
-def init_db(db_name=None):
-    """
-    Initialize the database with the complete enhanced schema.
-    Uses db.DB_NAME so that tests can override the database path.
+def init_db(db_name: str | None = None) -> None:
+    """Create a fresh database with schema, constraints, triggers, and views.
+
+    Args:
+        db_name: Optional database file path. When omitted, ``db.DB_NAME``
+            is used.
+
+    The initializer removes an existing database file at the target path,
+    recreates the full schema, and seeds all static domain tables.
     """
     target_db_name = db_name or db.DB_NAME
 
@@ -19,7 +27,7 @@ def init_db(db_name=None):
     cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute("PRAGMA recursive_triggers = ON;")
 
-    #  MASTER LOOKUP TABLES  – Domain Normalization (Item 4 & 5)
+    # Create domain lookup/master tables first so foreign key targets exist.
 
     cursor.execute("""
     CREATE TABLE BLOOD_GROUP_MASTER (
@@ -68,7 +76,7 @@ def init_db(db_name=None):
     ]:
         cursor.execute("INSERT INTO COMPONENT_MASTER VALUES (?, ?)", (ct, sl))
 
-    # Cross-match Compatibility Matrix (Item 8)
+    # Compatibility matrix controls medically valid donor/recipient pairs.
     cursor.execute("""
     CREATE TABLE COMPATIBILITY_MATRIX (
         recipient_group  TEXT NOT NULL,
@@ -80,7 +88,7 @@ def init_db(db_name=None):
     );
     """)
     compat_data = [
-        # (recipient, donor, preference_rank)  — lower rank = preferred first
+        # Lower preference_rank means "consume first" during allocation.
         ("A+", "A+", 1),
         ("A+", "A-", 2),
         ("A+", "O+", 3),
@@ -111,9 +119,9 @@ def init_db(db_name=None):
     ]
     cursor.executemany("INSERT INTO COMPATIBILITY_MATRIX VALUES (?, ?, ?)", compat_data)
 
-    #  CORE TABLES
+    # Create operational tables used by the application runtime.
 
-    # 1. DONOR  (Item 6 – soft delete via is_active)
+    # Donor registry uses soft-delete via the is_active flag.
     cursor.execute("""
     CREATE TABLE DONOR (
         donor_id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +135,7 @@ def init_db(db_name=None):
     );
     """)
 
-    # 2. RECIPIENT  (Item 6 – soft delete)
+    # Hospital/recipient registry also uses soft-delete.
     cursor.execute("""
     CREATE TABLE RECIPIENT (
         recipient_id  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,7 +157,7 @@ def init_db(db_name=None):
     );
     """)
 
-    # 4. BLOOD_BAG  (Item 5 – component tracking)
+    # Inventory bag table tracks per-bag volume and component metadata.
     cursor.execute("""
     CREATE TABLE BLOOD_BAG (
         bag_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,7 +176,7 @@ def init_db(db_name=None):
     );
     """)
 
-    # 5. TRANSFUSION_REQ  (Item 10 – partial fulfillment tracking)
+    # Request table stores requested and allocated amounts for partial fills.
     cursor.execute("""
     CREATE TABLE TRANSFUSION_REQ (
         req_id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,7 +209,7 @@ def init_db(db_name=None):
     );
     """)
 
-    # 7. AUDIT_LOG  (Item 3 – forensic traceability)
+    # Audit trail table stores trigger-generated forensic change history.
     cursor.execute("""
     CREATE TABLE AUDIT_LOG (
         log_id       INTEGER  PRIMARY KEY AUTOINCREMENT,
@@ -215,7 +223,7 @@ def init_db(db_name=None):
     );
     """)
 
-    #  INDEXES  (performance for dashboard/allocation filters)
+    # Indexes accelerate frequent filter and ordering predicates.
     cursor.execute(
         "CREATE INDEX idx_bag_status_expiry ON BLOOD_BAG(status, expiry_date);"
     )
@@ -234,9 +242,9 @@ def init_db(db_name=None):
         "CREATE INDEX idx_fulfillment_date ON FULFILLMENT_LOG(fulfillment_date);"
     )
 
-    #  TRIGGERS  (Items 1 & 3)
+    # Triggers enforce integrity and produce automatic audit records.
 
-    # --- Trigger 1-a: Auto-Expire Bags  (volume ≤ 0 → status = 'Empty') ---
+    # Mark a bag as Empty when deducted volume reaches zero or below.
     cursor.execute("""
     CREATE TRIGGER trg_auto_expire_bag
     AFTER UPDATE OF current_volume_ml ON BLOOD_BAG
@@ -246,7 +254,7 @@ def init_db(db_name=None):
     END;
     """)
 
-    # --- Trigger 1-b: Donation Safety Lock (56-day rule) ---
+    # Block donation inserts that violate the minimum donation interval.
     cursor.execute("""
     CREATE TRIGGER trg_donation_safety_lock
     BEFORE INSERT ON DONATION_LOG
@@ -263,7 +271,7 @@ def init_db(db_name=None):
     END;
     """)
 
-    # --- Trigger 1-c: Fulfillment Volume Guard ---
+    # Block fulfillment inserts that exceed current bag volume.
     cursor.execute("""
     CREATE TRIGGER trg_fulfillment_volume_guard
     BEFORE INSERT ON FULFILLMENT_LOG
@@ -278,7 +286,7 @@ def init_db(db_name=None):
     END;
     """)
 
-    # --- Trigger: Auto-update partial/full fulfillment on TRANSFUSION_REQ ---
+    # Recompute request allocated amount and status after each fulfillment.
     cursor.execute("""
     CREATE TRIGGER trg_update_req_allocated
     AFTER INSERT ON FULFILLMENT_LOG
@@ -301,7 +309,7 @@ def init_db(db_name=None):
     END;
     """)
 
-    # ── Audit-trail triggers on sensitive tables ─────────────────
+    # Audit triggers capture inserts/updates for sensitive transactional tables.
 
     cursor.execute("""
     CREATE TRIGGER trg_audit_bag_insert
@@ -369,7 +377,7 @@ def init_db(db_name=None):
     END;
     """)
 
-    #  VIEWS  (Item 2 – Materialized / Computed Summary Views)
+    # Dashboard-facing views centralize common reporting queries.
 
     cursor.execute("""
     CREATE VIEW vw_inventory_summary AS
