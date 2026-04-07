@@ -169,4 +169,69 @@
         </div>
     </div>
 </div>
+
+<div class="card p-4 shadow-sm mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-building me-1"></i> Hospital Registry</h5>
+        <form method="GET" class="d-flex align-items-center gap-2">
+            <label for="hospitalStatusFilter" class="small text-muted">Show</label>
+            <select id="hospitalStatusFilter" name="status" class="form-select form-select-sm">
+                <option value="active" {{ 'selected' if hospital_status_filter == 'active' else '' }}>Active</option>
+                <option value="inactive" {{ 'selected' if hospital_status_filter == 'inactive' else '' }}>Inactive</option>
+                <option value="all" {{ 'selected' if hospital_status_filter == 'all' else '' }}>All</option>
+            </select>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Apply</button>
+        </form>
+    </div>
+
+    {% if hospital_registry %}
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Hospital</th>
+                    <th>Contact Person</th>
+                    <th>Contact Info</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in hospital_registry %}
+                <tr>
+                    <td>{{ h.recipient_id }}</td>
+                    <td>{{ h.hospital_name }}</td>
+                    <td>{{ h.name }}</td>
+                    <td>{{ h.contact_info or 'N/A' }}</td>
+                    <td>
+                        {% if h.is_active %}
+                        <span class="badge bg-success">Active</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" class="d-inline">
+                            <input type="hidden" name="recipient_id" value="{{ h.recipient_id }}">
+                            <input type="hidden" name="status" value="{{ hospital_status_filter }}">
+                            {% if h.is_active %}
+                            <input type="hidden" name="deactivate_hospital" value="true">
+                            <button type="submit" class="btn btn-outline-danger btn-sm"
+                                onclick="return confirm('Deactivate this hospital?')">Deactivate</button>
+                            {% else %}
+                            <input type="hidden" name="reactivate_hospital" value="true">
+                            <button type="submit" class="btn btn-outline-success btn-sm">Reactivate</button>
+                            {% endif %}
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">No hospitals match this filter.</p>
+    {% endif %}
+</div>
 {% endblock %}

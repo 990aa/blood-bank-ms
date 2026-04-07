@@ -56,7 +56,7 @@ def process_donation(donor_id, quantity_ml, split_components=False):
 
         quantity_ml = float(quantity_ml)
         if quantity_ml <= 0:
-            raise ValueError("Quantity must be greater than 0 ml")
+            raise ValueError("Quantity must be greater than zero.")
 
         # Application-level safety check (nice error message).
         # DB trigger trg_donation_safety_lock is the hard enforcement.
@@ -240,6 +240,20 @@ def get_shortage_alerts():
     """
     conn = get_db_connection()
 
+    first_fulfillment_row = conn.execute(
+        "SELECT MIN(fulfillment_date) AS first_fulfillment_date FROM FULFILLMENT_LOG"
+    ).fetchone()
+
+    days_window = 1
+    if first_fulfillment_row and first_fulfillment_row["first_fulfillment_date"]:
+        first_fulfillment_date = date.fromisoformat(
+            str(first_fulfillment_row["first_fulfillment_date"])
+        )
+        days_active = (_utc_today() - first_fulfillment_date).days + 1
+        days_window = min(max(days_active, 1), 30)
+
+    window_offset = f"-{days_window - 1} days"
+
     # Current available stock per blood group
     stock_rows = conn.execute("""
         SELECT blood_group, SUM(current_volume_ml) AS total_ml
@@ -253,15 +267,15 @@ def get_shortage_alerts():
     # Average daily consumption per group (last 30 days)
     consumption_rows = conn.execute("""
         SELECT bgm.blood_group,
-               COALESCE(SUM(fl.quantity_allocated_ml), 0) / 30.0 AS avg_daily
+             COALESCE(SUM(fl.quantity_allocated_ml), 0) / ? AS avg_daily
         FROM   BLOOD_GROUP_MASTER bgm
         LEFT JOIN BLOOD_BAG bb
                ON bgm.blood_group = bb.blood_group
         LEFT JOIN FULFILLMENT_LOG fl
                ON fl.bag_id = bb.bag_id
-              AND fl.fulfillment_date >= DATE('now', '-30 days')
+            AND fl.fulfillment_date >= DATE('now', ?)
         GROUP  BY bgm.blood_group
-    """).fetchall()
+        """, (float(days_window), window_offset)).fetchall()
 
     alerts = []
     for row in consumption_rows:

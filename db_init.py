@@ -215,6 +215,25 @@ def init_db(db_name=None):
     );
     """)
 
+    #  INDEXES  (performance for dashboard/allocation filters)
+    cursor.execute(
+        "CREATE INDEX idx_bag_status_expiry ON BLOOD_BAG(status, expiry_date);"
+    )
+    cursor.execute(
+        "CREATE INDEX idx_bag_component_group ON BLOOD_BAG(component_type, blood_group, status);"
+    )
+    cursor.execute(
+        "CREATE INDEX idx_req_status_urgency ON TRANSFUSION_REQ(status, urgency_level);"
+    )
+    cursor.execute(
+        "CREATE INDEX idx_req_recipient_status ON TRANSFUSION_REQ(recipient_id, status);"
+    )
+    cursor.execute("CREATE INDEX idx_donor_active ON DONOR(is_active);")
+    cursor.execute("CREATE INDEX idx_recipient_active ON RECIPIENT(is_active);")
+    cursor.execute(
+        "CREATE INDEX idx_fulfillment_date ON FULFILLMENT_LOG(fulfillment_date);"
+    )
+
     #  TRIGGERS  (Items 1 & 3)
 
     # --- Trigger 1-a: Auto-Expire Bags  (volume ≤ 0 → status = 'Empty') ---
