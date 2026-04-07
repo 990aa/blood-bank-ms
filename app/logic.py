@@ -265,7 +265,8 @@ def get_shortage_alerts():
     stock = {r["blood_group"]: r["total_ml"] for r in stock_rows}
 
     # Average daily consumption per group (last 30 days)
-    consumption_rows = conn.execute("""
+    consumption_rows = conn.execute(
+        """
         SELECT bgm.blood_group,
              COALESCE(SUM(fl.quantity_allocated_ml), 0) / ? AS avg_daily
         FROM   BLOOD_GROUP_MASTER bgm
@@ -275,7 +276,9 @@ def get_shortage_alerts():
                ON fl.bag_id = bb.bag_id
             AND fl.fulfillment_date >= DATE('now', ?)
         GROUP  BY bgm.blood_group
-        """, (float(days_window), window_offset)).fetchall()
+        """,
+        (float(days_window), window_offset),
+    ).fetchall()
 
     alerts = []
     for row in consumption_rows:

@@ -78,7 +78,9 @@ def _add_request(
 
 
 class TestRouteCrashHandling:
-    def test_donor_route_handles_non_numeric_donation_quantity(self, flask_client, setup_db):
+    def test_donor_route_handles_non_numeric_donation_quantity(
+        self, flask_client, setup_db
+    ):
         donor_id = _add_donor(setup_db, "Crash Guard Donor", "A+")
 
         resp = flask_client.post(
@@ -193,7 +195,9 @@ class TestNonPositiveValidation:
         assert not ok_negative
         assert "greater than zero" in msg_negative.lower()
 
-    def test_hospital_request_rejects_non_positive_quantity(self, flask_client, setup_db):
+    def test_hospital_request_rejects_non_positive_quantity(
+        self, flask_client, setup_db
+    ):
         recipient_id = _add_recipient(setup_db, "Dr. Zero", "Zero Hospital")
 
         resp = flask_client.post(
@@ -212,14 +216,18 @@ class TestNonPositiveValidation:
         assert resp.status_code == 200
         assert b"Quantity must be greater than zero" in resp.data
 
-        req_count = setup_db.execute("SELECT COUNT(*) FROM TRANSFUSION_REQ").fetchone()[0]
+        req_count = setup_db.execute("SELECT COUNT(*) FROM TRANSFUSION_REQ").fetchone()[
+            0
+        ]
         assert req_count == 0
 
 
 class TestReactivationFlows:
     def test_donor_inactive_filter_and_reactivate(self, flask_client, setup_db):
         donor_id = _add_donor(setup_db, "Dormant Donor", "B+")
-        setup_db.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (donor_id,))
+        setup_db.execute(
+            "UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (donor_id,)
+        )
         setup_db.commit()
 
         page = flask_client.get("/donor?status=inactive")
@@ -305,10 +313,13 @@ class TestShortageMathAndIndexes:
         }
         req_indexes = {
             row["name"]
-            for row in setup_db.execute("PRAGMA index_list('TRANSFUSION_REQ')").fetchall()
+            for row in setup_db.execute(
+                "PRAGMA index_list('TRANSFUSION_REQ')"
+            ).fetchall()
         }
         donor_indexes = {
-            row["name"] for row in setup_db.execute("PRAGMA index_list('DONOR')").fetchall()
+            row["name"]
+            for row in setup_db.execute("PRAGMA index_list('DONOR')").fetchall()
         }
 
         assert "idx_bag_status_expiry" in bag_indexes
@@ -317,7 +328,9 @@ class TestShortageMathAndIndexes:
 
 
 class TestDashboardOrdering:
-    def test_donation_history_orders_same_day_by_latest_insert(self, flask_client, setup_db):
+    def test_donation_history_orders_same_day_by_latest_insert(
+        self, flask_client, setup_db
+    ):
         donor_older = _add_donor(setup_db, "Older Donation Donor", "A+")
         donor_newer = _add_donor(setup_db, "Newer Donation Donor", "A+")
 
@@ -331,7 +344,9 @@ class TestDashboardOrdering:
 
         assert html.index("Newer Donation Donor") < html.index("Older Donation Donor")
 
-    def test_fulfilled_history_orders_same_day_by_latest_insert(self, flask_client, setup_db):
+    def test_fulfilled_history_orders_same_day_by_latest_insert(
+        self, flask_client, setup_db
+    ):
         donor_id = _add_donor(setup_db, "Bag Source", "A+")
         ok, _ = process_donation(donor_id, 400)
         assert ok

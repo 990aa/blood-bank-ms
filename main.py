@@ -27,14 +27,14 @@ def _parse_positive_int(value):
     try:
         parsed = int(value)
         return parsed if parsed > 0 else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _parse_float(value):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -379,7 +379,8 @@ def hospital():
                     flash("Invalid hospital selected.", "danger")
                 else:
                     conn.execute(
-                        "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?", (rid,)
+                        "UPDATE RECIPIENT SET is_active = 0 WHERE recipient_id = ?",
+                        (rid,),
                     )
                     conn.commit()
                     flash("Hospital deactivated (soft delete).", "warning")
@@ -390,7 +391,8 @@ def hospital():
                     flash("Invalid hospital selected.", "danger")
                 else:
                     conn.execute(
-                        "UPDATE RECIPIENT SET is_active = 1 WHERE recipient_id = ?", (rid,)
+                        "UPDATE RECIPIENT SET is_active = 1 WHERE recipient_id = ?",
+                        (rid,),
                     )
                     conn.commit()
                     flash("Hospital reactivated.", "success")
