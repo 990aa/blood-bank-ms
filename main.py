@@ -26,14 +26,14 @@ def _parse_positive_int(value):
     try:
         parsed = int(value)
         return parsed if parsed > 0 else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _parse_float(value):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -221,7 +221,9 @@ def donor():
             if did is None:
                 flash("Invalid donor selected.", "danger")
             else:
-                conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,))
+                conn.execute(
+                    "UPDATE DONOR SET is_active = 0 WHERE donor_id = ?", (did,)
+                )
                 conn.commit()
                 flash("Donor deactivated (soft delete).", "warning")
 

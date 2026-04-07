@@ -22,13 +22,10 @@ def _utc_today_str():
     return _date_str(_utc_today())
 
 
-
 # Component split ratios are configured in app.settings
 
 
-
 # 1. DONATION  (Trigger 1-b enforces 56-day rule at DB level)
-
 
 
 def process_donation(donor_id, quantity_ml, split_components=False):
@@ -137,10 +134,8 @@ def process_donation(donor_id, quantity_ml, split_components=False):
         conn.close()
 
 
-
 # 2. SMART ALLOCATION  (Items 8  & 10 – compatibility scoring,
 #                        partial fulfillment)
-
 
 
 def smart_allocate_all():
@@ -233,9 +228,7 @@ def smart_allocate_all():
         conn.close()
 
 
-
 # 3. PREDICTIVE SHORTAGE ALERT ENGINE  (Item 7)
-
 
 
 def get_shortage_alerts():
@@ -293,9 +286,7 @@ def get_shortage_alerts():
     return alerts
 
 
-
 # 4. DONOR LOYALTY & ELIGIBILITY MODULE  (Item 9)
-
 
 
 def get_donor_scores():
@@ -306,7 +297,8 @@ def get_donor_scores():
     (O−/AB− → 10,  A−/B− → 5)
     """
     conn = get_db_connection()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT d.donor_id,
                d.name,
                d.blood_group,
@@ -335,7 +327,9 @@ def get_donor_scores():
                        WHEN d.blood_group IN ('A-','B-')  THEN 5
                        ELSE 0
                      END) DESC
-    """, (DONATION_SAFETY_DAYS,)).fetchall()
+    """,
+        (DONATION_SAFETY_DAYS,),
+    ).fetchall()
     conn.close()
     return rows
 
@@ -372,9 +366,7 @@ def get_eligible_donors_for_group(blood_group, limit=5):
     return donors
 
 
-
 # 5. DASHBOARD HELPERS  (use SQL Views)
-
 
 
 def get_dashboard_stats():
