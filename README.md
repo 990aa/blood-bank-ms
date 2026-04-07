@@ -73,31 +73,6 @@ Open **http://127.0.0.1:5000** in your browser.
 
 ---
 
-## Running Tests
-
-```bash
-uv run pytest tests/test_logic.py -v
-```
-
-**95 tests** covering:
-- Granular allocation & multi-bag fulfillment
-- Priority ordering (Critical > Normal, quantity descending)
-- All 3 DB triggers (auto-expire, safety lock, volume guard)
-- All 3 SQL views
-- Audit trail completeness
-- Domain normalization (FK rejection of invalid data)
-- Component tracking (split + shelf lives)
-- Soft deletes (donor + recipient)
-- Predictive shortage alerts
-- Cross-match compatibility scoring
-- Donor loyalty scores & eligibility
-- Partial fulfillment & incremental allocation
-- Edge cases (tiny/large donations, idempotent allocation, nonexistent donors)
-- Stress tests (50 donors, 30 requests, concurrent reads)
-- Flask route integration tests (all GET/POST endpoints + 404)
-
----
-
 ## Linting & Type Checking
 
 ```bash
