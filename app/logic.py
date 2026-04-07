@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta, timezone
 import sqlite3
+from typing import TypedDict
 
 from app.settings import (
     COMPONENT_SPLIT_RATIO,
@@ -11,7 +12,13 @@ from app.settings import (
 from db import get_db_connection
 
 
-ShortageAlert = dict[str, str | float]
+class ShortageAlert(TypedDict):
+    """Structured payload returned by ``get_shortage_alerts``."""
+
+    blood_group: str
+    current_ml: float
+    daily_rate: float
+    projected_days: float
 
 
 def _date_str(d: date | str) -> str:

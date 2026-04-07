@@ -36,7 +36,7 @@ def _parse_positive_int(value: str | None) -> int | None:
     """
     try:
         parsed = int(value) if value is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if parsed is not None and parsed > 0 else None
 
@@ -48,7 +48,7 @@ def _parse_float(value: str | None) -> float | None:
     """
     try:
         return float(value) if value is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -147,7 +147,9 @@ def index() -> ResponseReturnValue:
     shortage_donors: dict[str, list[sqlite3.Row]] = {}
     for alert in shortage_alerts:
         blood_group = str(alert["blood_group"])
-        shortage_donors[blood_group] = get_eligible_donors_for_group(blood_group, limit=5)
+        shortage_donors[blood_group] = get_eligible_donors_for_group(
+            blood_group, limit=5
+        )
 
     # Tie-break by primary key so newest row of same day appears first.
     donations = conn.execute(

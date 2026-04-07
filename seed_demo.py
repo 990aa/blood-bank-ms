@@ -1,21 +1,14 @@
-"""
-seed_demo.py – Inject realistic demo data for the Blood Bank Management System.
+"""Populate a fresh database with deterministic demo data.
 
 Run with:
     uv run python seed_demo.py
 
-This script:
-  1. Re-initialises the database (drops + rebuilds schema)
-  2. Registers 12 donors across all 8 blood groups
-  3. Registers 4 hospitals
-  4. Logs donations (whole-blood and component-split)
-  5. Creates transfusion requests (Normal + Critical, various components)
-  6. Runs the Smart Allocation algorithm
-  7. Creates an "expiring soon" bag for dashboard demo
-  8. Soft-deletes one donor to demo the feature
-
-After running, start the app with:
-    uv run python main.py
+The seed process intentionally creates:
+1. Diverse donor and recipient records
+2. Historical and same-day donation activity
+3. Mixed urgency/component transfusion requests
+4. Allocation and audit artifacts visible in dashboard/audit pages
+5. A soft-delete and mixed eligibility windows for donor filtering demos
 """
 
 from datetime import timedelta
@@ -25,8 +18,9 @@ from app.logic import _date_str, _utc_today, process_donation, smart_allocate_al
 from db_init import init_db
 
 
-def seed():
-    # ── Step 1: Fresh database ──────────────────────────────────
+def seed() -> None:
+    """Execute the full demo data seeding workflow."""
+    # Recreate the schema from scratch to guarantee predictable IDs and data.
     print("Initialising database...")
     init_db()
 
@@ -34,8 +28,7 @@ def seed():
     today = _utc_today()
     today_str = _date_str(today)
 
-    # ── Step 2: Register Donors ─────────────────────────────────
-    # ── Step 2: Register Donors ─────────────────────────────────
+    # Register donor rows spanning all blood groups.
     donors = [
         ("James Smith", "A+", "07700-900123"),
         ("Charlotte Jones", "A-", "07700-900456"),
@@ -58,8 +51,7 @@ def seed():
         )
     conn.commit()
 
-    # ── Step 3: Register Hospitals ──────────────────────────────
-    # ── Step 3: Register Hospitals ──────────────────────────────
+    # Register recipient hospitals used by request and waitlist flows.
     hospitals = [
         ("Dr. Harrison", "St Thomas' Hospital", "020 7188 7188"),
         ("Dr. Campbell", "Royal Infirmary", "0131 536 1000"),
@@ -75,8 +67,7 @@ def seed():
         )
     conn.commit()
 
-    # ── Step 4: Log Donations ───────────────────────────────────
-    # Reset donors to allow controlled demo seeding.
+    # Reset last donation history so historical entries can be inserted deterministically.
     for did in range(1, len(donors) + 1):
         conn.execute(
             "UPDATE DONOR SET last_donation_date = NULL WHERE donor_id = ?",
@@ -84,7 +75,7 @@ def seed():
         )
     conn.commit()
 
-    # Add historical donations (other days) so timelines are not all the same.
+    # Insert historical donations to make charts/history tables realistic.
     historical_donations = [
         # (donor_id, quantity_ml, days_ago)
         (1, 300, 120),
@@ -108,7 +99,7 @@ def seed():
         )
     conn.commit()
 
-    # Whole-blood donations today
+    # Same-day whole blood donations used for current stock.
     whole_blood_donations = [
         (1, 450),
         (3, 420),
@@ -123,7 +114,7 @@ def seed():
         ok, msg = process_donation(did, qty, split_components=False)
         print(f"  Donor {did}: {msg}")
 
-    # Component-split donations today (all remaining donors)
+    # Same-day component-split donations populate RBC/Platelet/Plasma inventory.
     split_donations = [
         (2, 500),
         (4, 350),
@@ -136,7 +127,7 @@ def seed():
         ok, msg = process_donation(did, qty, split_components=True)
         print(f"  Donor {did}: {msg}")
 
-    # ── Step 5: Create Transfusion Requests ─────────────────────
+    # Insert a mixed request queue so allocation priority behavior is visible.
     requests = [
         # (recipient_id, blood_group, component, qty, urgency)
         (1, "A+", "Whole Blood", 300, "Critical"),
@@ -159,13 +150,12 @@ def seed():
         )
     conn.commit()
 
-    # ── Step 6: Run Smart Allocation ────────────────────────────
+    # Run allocation once so dashboard tabs are populated immediately.
     print("Running Smart Allocation algorithm...")
     ok, msg = smart_allocate_all()
     print(f"  {msg}")
 
-    # ── Step 7: Create an "expiring soon" bag for demo ──────────
-    # Manually adjust one bag's expiry to 2 days from now
+    # Force one available bag near expiry for expiring-soon dashboard cards.
     soon = _date_str(today + timedelta(days=2))
     bag = conn.execute(
         "SELECT bag_id FROM BLOOD_BAG WHERE status='Available' LIMIT 1"
@@ -178,13 +168,12 @@ def seed():
         conn.commit()
         print(f"  Bag #{bag['bag_id']} set to expire in 2 days (demo)")
 
-    # ── Step 8: Soft-delete a donor for demo ────────────────────
+    # Soft-delete one donor to demonstrate inactive filtering/reactivation UI.
     conn.execute("UPDATE DONOR SET is_active = 0 WHERE donor_id = 6")
     conn.commit()
     print("  Donor #6 (Isla Wilson) soft-deleted for demo")
 
-    # ── Step 9: Mixed eligibility windows (at least 5 eligible) ─
-    # Keep some donors immediately eligible (>=56 days) and others recent.
+    # Assign mixed donation intervals so the eligibility badges are not uniform.
     last_donation_offsets = {
         1: 120,
         2: 20,
@@ -206,6 +195,7 @@ def seed():
         )
     conn.commit()
 
+    # Confirm there are enough active eligible donors for shortage-contact demos.
     eligible_count = conn.execute(
         """
         SELECT COUNT(*) AS cnt
@@ -221,7 +211,7 @@ def seed():
 
     conn.close()
 
-    # ── Summary ─────────────────────────────────────────────────
+    # Print quick next steps for interactive demo usage.
     print("\n" + "=" * 55)
     print("  SEED COMPLETE – Demo data loaded successfully!")
     print("=" * 55)
